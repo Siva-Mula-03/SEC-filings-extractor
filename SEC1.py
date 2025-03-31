@@ -4,7 +4,6 @@ import pandas as pd
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 import re
-import os
 
 # SEC Base URL
 BASE_URL = "https://www.sec.gov"
@@ -122,33 +121,58 @@ def extract_section_text(doc_url, start_section=None, end_section=None):
         st.error(f"Extraction error: {str(e)}")
         return None
 
-# Function to read the content of a file
-def read_file(file_name):
+# Set up the groq API configuration
+API_KEY = "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"
+API_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+# Function to send a message to the groq API and get a response
+def process_with_groq(text):
+    headers = {
+        'Authorization': f'Bearer {API_KEY}',
+        'Content-Type': 'application/json'
+    }
+
+    data = {
+        "model": "llama-3.3-70b-versatile",  # Model name as per the documentation
+        "messages": [
+            {"role": "user", "content": str(text)}  # Ensure content is a string
+        ],
+        "temperature": 0.7  # Optional parameter
+    }
+
     try:
-        with open(file_name, 'r') as file:
-            return file.read()
-    except Exception as e:
-        st.error(f"Error reading file: {e}")
+        # Send POST request with a timeout of 30 seconds
+        response = requests.post(API_URL, headers=headers, json=data, timeout=30)
+
+        # Log the response status code and response body for debugging
+        print("Response Status Code:", response.status_code)
+        print("Response Text:", response.text)
+
+        # Check if the request was successful (status code 200)
+        response.raise_for_status()  # Will raise an exception for 4xx or 5xx status codes
+
+        response_data = response.json()
+
+        # Check if 'choices' are in the response and return content
+        if 'choices' in response_data and len(response_data['choices']) > 0:
+            return response_data['choices'][0]['message']['content']
+        else:
+            print("Unexpected response structure:", json.dumps(response_data, indent=2))
+            return None
+
+    except requests.exceptions.RequestException as e:
+        print(f"Error during API request: {e}")
         return None
+
 
 # Streamlit UI
 st.set_page_config(page_title="SEC Filing Analyzer", layout="wide")
 st.title("📊 SEC Extract")
 
-# Sidebar - Configuration and Task Selection
 with st.sidebar:
     st.header("Configuration")
-    task = st.radio("Select Task", ["Task 1: 10-Q Filings", "Task 2: URL Text Extraction", "Codes"])
+    task = st.radio("Select Task", ["Task 1: 10-Q Filings", "Task 2: URL Text Extraction"])
     
-    # Files under the "Codes" section
-    if task == "Codes":
-        st.header("Files")
-        selected_file = st.selectbox("Select a code file to display", ["combined_with_ui.py", "task1.py", "task2.py"])
-        file_content = read_file(selected_file)
-        if file_content:
-            st.code(file_content, language='python')
-
-# Task 1: 10-Q Filings
 if task == "Task 1: 10-Q Filings":
     st.header("🔍 Fetch 10-Q Filings")
     col1, col2 = st.columns([1, 2])
@@ -188,27 +212,54 @@ if task == "Task 1: 10-Q Filings":
             ]
             st.info(f"Filtered to {len(st.session_state.filtered_df)} filings")
         else:
-            st.session_state.filtered_df = st.session_state.df
+            st.session_state.filtered_df = st.session_state.df.copy()
 
-        st.write(st.session_state.filtered_df)
+        st.dataframe(st.session_state.filtered_df, height=500)
 
-# Task 2: URL Text Extraction
-if task == "Task 2: URL Text Extraction":
-    st.header("🔍 Extract Text from URL")
-    url = st.text_input("Enter SEC Filing URL", value="")
-    start_section = st.text_input("Start Section", value="")
-    end_section = st.text_input("End Section", value="")
+        if not st.session_state.filtered_df.empty:
+            col1, col2 = st.columns(2)
+            with col1:
+                csv = st.session_state.filtered_df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Download as CSV",
+                    data=csv,
+                    file_name=f"10Q_filings_{year}_Q{'-'.join(map(str, quarters))}.csv",
+                    mime='text/csv'
+                )
+            with col2:
+                txt = st.session_state.filtered_df.to_string(index=False).encode('utf-8')
+                st.download_button(
+                    label="📥 Download as TXT",
+                    data=txt,
+                    file_name=f"10Q_filings_{year}_Q{'-'.join(map(str, quarters))}.txt",
+                    mime='text/plain'
+                )
+
+elif task == "Task 2: Document Extraction":
+    st.header("📑 Extract SEC Document Section")
     
-    if url and st.button("Extract"):
-        with st.spinner("Extracting..."):
-            doc_url = get_document_url(url)
-            if doc_url:
-                content = extract_section_text(doc_url, start_section, end_section)
-                if content:
-                    st.write("### Extracted Content")
-                    st.write("\n".join(content))
-                else:
-                    st.warning("No content found")
-            else:
-                st.warning("Document not found")
+    with st.expander("ℹ️ How to use", expanded=True):
+        st.write("""
+        1. Paste the SEC Filing URL for the document you want to extract from.
+        2. Specify the sections of the document (optional).
+        3. Extract the document and let the AI analyze its contents.
+        """)
+
+    doc_url = st.text_input("Enter SEC Filing URL", value="")
+    start_section = st.text_input("Enter start section (optional)")
+    end_section = st.text_input("Enter end section (optional)")
+
+    if st.button("Extract Section"):
+        with st.spinner("Extracting document..."):
+            content = extract_section_text(doc_url, start_section, end_section)
+            if content:
+                st.write("### Extracted Content")
+                st.write("\n".join(content))
+                
+                st.write("### Processing with AI...")
+                ai_results = process_with_groq(content)
+                print(ai_results)
+                if ai_results:
+                    st.write("### AI Analysis Result")
+                    st.markdown(ai_results)
 
