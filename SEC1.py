@@ -65,7 +65,7 @@ def create_zip(filings):
     zip_buffer.seek(0)
     return zip_buffer
 
-# Function to extract SEC document sections without NLP
+# Function to extract SEC document sections
 def extract_section(filing_url, section_name, end_marker):
     filing_url = validate_url(filing_url)
     if not filing_url:
@@ -136,16 +136,23 @@ elif task == "Task 2: Document Extraction":
             extracted_text = extract_section(filing_url, section_name, end_marker)
 
             if extracted_text:
-                # Convert extracted text into a DataFrame with one row per piece of extracted text
-                df = pd.DataFrame(extracted_text, columns=["Extracted Text"])
+                # Split extracted text into separate rows for table and CSV output
+                split_text = [text.strip() for text in extracted_text if text.strip()]
+                
+                # Ensure we only get non-empty text blocks
+                if split_text:
+                    # Convert extracted text into a DataFrame with one row per piece of extracted text
+                    df = pd.DataFrame(split_text, columns=["Extracted Text"])
 
-                st.write("### Extracted Information")
-                st.dataframe(df)  # Display as a clean table
+                    st.write("### Extracted Information")
+                    st.dataframe(df)  # Display as a clean table
 
-                # Create a CSV from the extracted DataFrame
-                csv = df.to_csv(index=False).encode('utf-8')
+                    # Create a CSV from the extracted DataFrame
+                    csv = df.to_csv(index=False).encode('utf-8')
 
-                # Provide the download button for the CSV file
-                st.download_button("📥 Download CSV", data=csv, file_name="extracted_data.csv")
+                    # Provide the download button for the CSV file
+                    st.download_button("📥 Download CSV", data=csv, file_name="extracted_data.csv")
+                else:
+                    st.error("No relevant text found.")
             else:
                 st.error("No relevant data found. Please provide a valid section name and end marker.")
