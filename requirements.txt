@@ -5,3 +5,4 @@ streamlit
 nltk
 openai
 selenium
+webdriver_manager
