@@ -3,6 +3,7 @@ import requests
 import pandas as pd
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
+import re
 
 # SEC Base URL
 BASE_URL = "https://www.sec.gov"
@@ -62,7 +63,7 @@ def extract_section(url, start_section=None, end_section=None):
         
         if not start_section and not end_section:
             return [line for line in all_text if line.strip()]
-        
+
         start_idx = 0
         end_idx = len(all_text)
         
@@ -83,6 +84,33 @@ def extract_section(url, start_section=None, end_section=None):
     except Exception as e:
         st.error(f"Extraction error: {str(e)}")
         return None
+
+# Function to identify and extract structured headers and values
+def parse_headers_and_values(extracted_text):
+    sections = []
+    current_section = None
+    content = []
+
+    # Regular expressions to detect headers (Item numbers, etc.)
+    header_regex = r"(Item \d+\.?[\d]*|Section \d+\.?[\d]*)"
+    
+    for line in extracted_text:
+        header_match = re.match(header_regex, line)
+        if header_match:
+            if current_section:
+                # Save the last section if it's not empty
+                sections.append({"Header": current_section, "Content": "\n".join(content)})
+            # Start a new section
+            current_section = line.strip()
+            content = []
+        else:
+            content.append(line.strip())
+
+    # Append the last section if it exists
+    if current_section and content:
+        sections.append({"Header": current_section, "Content": "\n".join(content)})
+    
+    return sections
 
 # Streamlit UI
 st.title("📊 SEC Filing & Document Extractor")
@@ -154,8 +182,9 @@ elif task == "Task 2: Document Extraction":
     st.header("📑 Extract SEC Document Section")
     filing_url = st.text_input("Enter SEC Filing URL", 
                              placeholder="https://www.sec.gov/Archives/edgar/data/...")
-    
+
     with st.expander("Section Options (leave both blank for full extraction)"):
+
         col1, col2 = st.columns(2)
         with col1:
             section_name = st.text_input("Start Section (optional)", 
@@ -171,34 +200,33 @@ elif task == "Task 2: Document Extraction":
 
                 if extracted_text:
                     st.success(f"Extracted {len(extracted_text)} lines of text!")
-                    
-                    df = pd.DataFrame({
-                        'Line': range(1, len(extracted_text)+1),
-                        'Content': extracted_text
-                    })
-                    
-                    st.dataframe(df.head(100), height=400)
-                    
-                    if len(extracted_text) > 100:
-                        st.info(f"Showing first 100 of {len(extracted_text)} lines.")
-                    
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.download_button(
-                            label="📥 Download as CSV",
-                            data=df.to_csv(index=False).encode('utf-8'),
-                            file_name="extracted_sections.csv",
-                            mime='text/csv',
-                            key='csv_download_extract'
-                        )
-                    with col2:
-                        st.download_button(
-                            label="📄 Download as TXT",
-                            data="\n".join(extracted_text).encode('utf-8'),
-                            file_name="extracted_sections.txt",
-                            mime='text/plain',
-                            key='txt_download_extract'
-                        )
+
+                    # Parsing the extracted text into structured sections
+                    structured_sections = parse_headers_and_values(extracted_text)
+
+                    # Convert structured data into a DataFrame for better visualization
+                    if structured_sections:
+                        structured_df = pd.DataFrame(structured_sections)
+                        st.dataframe(structured_df)
+
+                        # Download options
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            st.download_button(
+                                label="📥 Download as CSV",
+                                data=structured_df.to_csv(index=False).encode('utf-8'),
+                                file_name="structured_sections.csv",
+                                mime='text/csv',
+                                key='csv_download_extract'
+                            )
+                        with col2:
+                            st.download_button(
+                                label="📄 Download as TXT",
+                                data="\n".join([f"{row['Header']}\n{row['Content']}" for index, row in structured_df.iterrows()]).encode('utf-8'),
+                                file_name="structured_sections.txt",
+                                mime='text/plain',
+                                key='txt_download_extract'
+                            )
                 else:
                     st.error("No content found. Try adjusting your section markers.")
         else:
