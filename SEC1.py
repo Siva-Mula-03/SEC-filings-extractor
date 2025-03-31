@@ -126,12 +126,13 @@ def extract_section_text(doc_url, start_section=None, end_section=None):
 st.set_page_config(page_title="SEC Filing Analyzer", layout="wide")
 st.title("📊 SEC Extract")
 
+# Sidebar: Task Selection
 with st.sidebar:
     st.header("Configuration")
     task = st.radio("Select Task", ["Task 1: 10-Q Filings", "Task 2: URL Text Extraction"])
 
-# Debugging task selection
-st.write(f"Task selected: {task}")
+# Debug: Check which task is selected
+st.write(f"Selected Task: {task}")
 
 if task == "Task 1: 10-Q Filings":
     st.header("🔍 Fetch 10-Q Filings")
@@ -192,7 +193,7 @@ if task == "Task 1: 10-Q Filings":
                     mime='text/plain'
                 )
 
-elif task == "Task 2: Document Extraction":
+elif task == "Task 2: URL Text Extraction":
     st.header("📑 Extract SEC Document Section")
     
     with st.expander("ℹ️ How to use", expanded=True):
@@ -202,26 +203,30 @@ elif task == "Task 2: Document Extraction":
         3. Extract the document and let the AI analyze its contents.
         """)
 
+    # Debugging step: Ensure input fields are displayed
     doc_url = st.text_input("Enter SEC Filing URL", value="")
     start_section = st.text_input("Enter start section (optional)")
     end_section = st.text_input("Enter end section (optional)")
 
-    # Debugging: Checking URL and sections input
-    st.write(f"URL: {doc_url}, Start: {start_section}, End: {end_section}")
+    # Debug: Output entered values
+    st.write(f"Entered URL: {doc_url}, Start Section: {start_section}, End Section: {end_section}")
 
     if st.button("Extract Section"):
-        with st.spinner("Extracting document..."):
-            content = extract_section_text(doc_url, start_section, end_section)
-            if content:
-                st.write("### Extracted Content")
-                st.write("\n".join(content))
-                
-                st.write("### Processing with AI...")
-                ai_results = process_with_groq(content)
-                if ai_results:
-                    st.write("### AI Analysis Result")
-                    st.markdown(ai_results)
+        if doc_url:
+            with st.spinner("Extracting document..."):
+                content = extract_section_text(doc_url, start_section, end_section)
+                if not content:
+                    st.warning("No content was extracted. Please check the URL and section names.")
                 else:
-                    st.warning("AI processing did not return results.")
-            else:
-                st.warning("No content extracted from the document.")
+                    st.write("### Extracted Content")
+                    st.write("\n".join(content))
+                
+                    st.write("### Processing with AI...")
+                    ai_results = process_with_groq(content)
+                    if ai_results:
+                        st.write("### AI Analysis Result")
+                        st.markdown(ai_results)
+                    else:
+                        st.warning("AI processing did not return results.")
+        else:
+            st.warning("Please enter a valid SEC filing URL.")
