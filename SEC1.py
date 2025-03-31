@@ -178,9 +178,10 @@ if task == "Task 1: 10-Q Filings":
     st.header("🔍 Fetch 10-Q Filings")
     col1, col2 = st.columns([1, 2])
     with col1:
-        year = st.number_input("Enter Year", min_value=1995, max_value=2025, value=2024)
-    with col2:
         quarters = st.multiselect("Select Quarters", [1, 2, 3, 4], default=[1])
+
+    with col2:
+        year = st.number_input("Enter Year", min_value=1995, max_value=2025, value=2024)
 
     if st.button("Fetch Filings"):
         with st.spinner("Fetching filings..."):
@@ -221,12 +222,8 @@ if task == "Task 1: 10-Q Filings":
             col1, col2 = st.columns(2)
             with col1:
                 csv = st.session_state.filtered_df.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label="📥 Download as CSV",
-                    data=csv,
-                    file_name=f"10Q_filings_{year}_Q{'-'.join(map(str, quarters))}.csv",
-                    mime='text/csv'
-                )
+                st.download_button("Download Filtered Results", csv, "filtered_results.csv", "text/csv", key="download-csv")
+
             with col2:
                 st.write("Click a row below to extract documents or data")
                 selected_row = st.selectbox("Select Filing", st.session_state.filtered_df.index)
@@ -242,4 +239,4 @@ if task == "Task 1: 10-Q Filings":
                         st.warning("No relevant section text found.")
                 else:
                     st.warning("No document found for the selected filing.")
-                
+
