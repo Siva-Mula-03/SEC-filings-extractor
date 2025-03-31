@@ -167,11 +167,11 @@ def process_with_groq(text):
 
 # Streamlit UI
 st.set_page_config(page_title="SEC Filing Analyzer", layout="wide")
-st.title("📊 SEC Filing & Document Extractor")
+st.title("📊 SEC Extract")
 
 with st.sidebar:
     st.header("Configuration")
-    task = st.radio("Select Task", ["Task 1: 10-Q Filings", "Task 2: Document Extraction"])
+    task = st.radio("Select Task", ["Task 1: 10-Q Filings", "Task 2: URL Text Extraction"])
     
 if task == "Task 1: 10-Q Filings":
     st.header("🔍 Fetch 10-Q Filings")
