@@ -40,9 +40,9 @@ def fetch_10q_filings(year, quarter):
                 for part in parts:
                     if part.startswith('/Archives/edgar/data/'):
                         filings.append({
-                            "Company": "Unknown",
-                            "CIK": "Unknown",
-                            "Date": "Unknown",
+                            "Company": " ".join(parts[:-3]),
+                            "CIK": parts[-3],
+                            "Date": parts[-2],
                             "URL": urljoin(BASE_URL, part)
                         })
                         break
@@ -65,7 +65,7 @@ def create_zip(filings):
     zip_buffer.seek(0)
     return zip_buffer
 
-# Function to extract SEC document sections
+# Function to extract SEC document sections with improved parsing
 def extract_section(filing_url, section_name, end_marker):
     filing_url = validate_url(filing_url)
     if not filing_url:
@@ -80,79 +80,152 @@ def extract_section(filing_url, section_name, end_marker):
         return None
 
     soup = BeautifulSoup(response.text, "html.parser")
-    extracted_section = []
+    extracted_sections = []
     capturing = False
 
-    # Extract relevant sections of the document
-    for element in soup.find_all(["p", "div", "table"]):
-        text = element.get_text().strip()
-
-        # Capture sections based on start and end markers
-        if section_name and section_name.lower() in text.lower():
+    # Extract all text elements
+    for element in soup.find_all(['p', 'div', 'table', 'span']):
+        text = element.get_text(separator='\n', strip=True)
+        
+        # If no section name provided, capture everything
+        if not section_name:
+            if text:
+                extracted_sections.extend(text.split('\n'))
+            continue
+            
+        # Section-based extraction
+        if section_name.lower() in text.lower():
             capturing = True
+            
         if capturing:
-            extracted_section.append(text)
+            if text:
+                extracted_sections.extend(text.split('\n'))
+                
         if end_marker and end_marker.lower() in text.lower():
+            capturing = False
             break
 
-    return extracted_section if extracted_section else None
+    # Clean and filter empty lines
+    cleaned_sections = [line.strip() for line in extracted_sections if line.strip()]
+    return cleaned_sections if cleaned_sections else None
 
 # Streamlit UI
 st.title("📊 SEC Filing & Document Extractor")
+st.sidebar.markdown("### Navigation")
 task = st.sidebar.radio("Select Task", ["Task 1: 10-Q Filings", "Task 2: Document Extraction"])
 
 if task == "Task 1: 10-Q Filings":
     st.header("🔍 Fetch 10-Q Filings")
-    year = st.number_input("Enter Year", min_value=1995, max_value=2025, value=2024)
-    quarters = st.multiselect("Select Quarters", [1, 2, 3, 4], default=[1])
+    col1, col2 = st.columns(2)
+    with col1:
+        year = st.number_input("Enter Year", min_value=1995, max_value=2025, value=2024)
+    with col2:
+        quarters = st.multiselect("Select Quarters", [1, 2, 3, 4], default=[1])
 
-    if st.button("Fetch Filings"):
-        all_filings = []
-        for q in quarters:
-            all_filings.extend(fetch_10q_filings(year, q))
+    if st.button("Fetch Filings", key="fetch_btn"):
+        with st.spinner("Fetching filings..."):
+            all_filings = []
+            for q in quarters:
+                filings = fetch_10q_filings(year, q)
+                if filings:
+                    all_filings.extend(filings)
 
-        if all_filings:
-            df = pd.DataFrame(all_filings)
-            st.write("### Filter Results")
-            query = st.text_input("Search by CIK, Company, or Date")
-            if query:
-                df = df[df.apply(lambda row: query.lower() in str(row).lower(), axis=1)]
+            if all_filings:
+                df = pd.DataFrame(all_filings)
+                st.success(f"Found {len(df)} filings!")
+                
+                st.write("### Filter Results")
+                query = st.text_input("Search by CIK, Company, or Date")
+                if query:
+                    df = df[df.apply(lambda row: query.lower() in str(row).lower(), axis=1)]
+                    st.info(f"Filtered to {len(df)} filings")
 
-            st.dataframe(df)
-            zip_buffer = create_zip(all_filings)
-            st.download_button("📥 Download ZIP", data=zip_buffer, file_name="10Q_filings.zip")
-        else:
-            st.error("No filings found.")
+                st.dataframe(df)
+                
+                # Improved download options
+                col1, col2 = st.columns(2)
+                with col1:
+                    if st.button("📥 Download as CSV"):
+                        csv = df.to_csv(index=False).encode('utf-8')
+                        st.download_button(
+                            label="Download CSV",
+                            data=csv,
+                            file_name=f"10Q_filings_{year}_Q{'-'.join(map(str, quarters))}.csv",
+                            mime='text/csv'
+                        )
+                with col2:
+                    if st.button("📦 Download as ZIP"):
+                        zip_buffer = create_zip(all_filings)
+                        st.download_button(
+                            label="Download ZIP",
+                            data=zip_buffer,
+                            file_name=f"10Q_filings_{year}_Q{'-'.join(map(str, quarters))}.zip",
+                            mime='application/zip'
+                        )
+            else:
+                st.error("No filings found for the selected criteria.")
 
 elif task == "Task 2: Document Extraction":
     st.header("📑 Extract SEC Document Section")
-    filing_url = st.text_input("Enter SEC Filing URL")
-    section_name = st.text_input("Start Section (Leave blank for full extraction)")
-    end_marker = st.text_input("End Section (Leave blank for full extraction)")
+    st.markdown("""
+    **Instructions:**
+    - Enter a valid SEC filing URL (e.g., 10-Q, 10-K)
+    - Optionally specify start/end sections to extract specific portions
+    """)
+    
+    filing_url = st.text_input("SEC Filing URL", placeholder="https://www.sec.gov/Archives/edgar/data/...")
+    col1, col2 = st.columns(2)
+    with col1:
+        section_name = st.text_input("Start Section (optional)", placeholder="Item 1. Business")
+    with col2:
+        end_marker = st.text_input("End Section (optional)", placeholder="Item 1A. Risk Factors")
 
-    if st.button("Extract Section"):
+    if st.button("Extract Document", key="extract_btn"):
         if filing_url:
-            # Extract document section without NLP processing (manual section extraction)
-            extracted_text = extract_section(filing_url, section_name, end_marker)
+            with st.spinner("Extracting document..."):
+                extracted_text = extract_section(filing_url, section_name, end_marker)
 
-            if extracted_text:
-                # Split extracted text into separate rows for table and CSV output
-                split_text = [text.strip() for text in extracted_text if text.strip()]
-                
-                # Ensure we only get non-empty text blocks
-                if split_text:
-                    # Convert extracted text into a DataFrame with one row per piece of extracted text
-                    df = pd.DataFrame(split_text, columns=["Extracted Text"])
-
-                    st.write("### Extracted Information")
-                    st.dataframe(df)  # Display as a clean table
-
-                    # Create a CSV from the extracted DataFrame
-                    csv = df.to_csv(index=False).encode('utf-8')
-
-                    # Provide the download button for the CSV file
-                    st.download_button("📥 Download CSV", data=csv, file_name="extracted_data.csv")
+                if extracted_text:
+                    st.success(f"Extracted {len(extracted_text)} text segments!")
+                    
+                    # Create DataFrame with proper line-by-line formatting
+                    df = pd.DataFrame({
+                        "Line Number": range(1, len(extracted_text)+1),
+                        "Text Content": extracted_text
+                    })
+                    
+                    # Display in expandable sections
+                    with st.expander("View Full Extracted Text", expanded=False):
+                        st.dataframe(df, height=400)
+                    
+                    # Download options
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        csv = df.to_csv(index=False).encode('utf-8')
+                        st.download_button(
+                            label="📥 Download as CSV",
+                            data=csv,
+                            file_name="extracted_sections.csv",
+                            mime='text/csv'
+                        )
+                    with col2:
+                        txt = "\n".join(extracted_text).encode('utf-8')
+                        st.download_button(
+                            label="📄 Download as TXT",
+                            data=txt,
+                            file_name="extracted_sections.txt",
+                            mime='text/plain'
+                        )
                 else:
-                    st.error("No relevant text found.")
-            else:
-                st.error("No relevant data found. Please provide a valid section name and end marker.")
+                    st.error("No relevant text found. Try adjusting your section markers.")
+        else:
+            st.warning("Please enter a valid SEC filing URL")
+
+# Add some footer information
+st.sidebar.markdown("---")
+st.sidebar.markdown("""
+**About this tool:**
+- Extracts SEC filings and documents
+- Data is sourced directly from SEC.gov
+- For research purposes only
+""")
