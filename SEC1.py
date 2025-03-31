@@ -259,6 +259,9 @@ elif task == "Task 2: URL Text Extraction":
                 if not content:
                     st.warning("No content was extracted. Please check the URL and section names.")
                 else:
+
+                    st.write("### Extracted Content")
+                    st.write("\n".join(content))
                     st.write("### Processing with AI...")
                     ai_results = process_with_groq(content)
                     if ai_results:
