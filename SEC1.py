@@ -134,10 +134,11 @@ def process_with_groq(text):
     
     # Prepare the payload according to the Groq documentation
     data = {
-        "model": "llama-3.3-70b-versatile",  # Use the appropriate model as per the docs
+        "model": "llama3-70b-8192",  # Updated model name (as of current Groq docs)
         "messages": [
             {"role": "user", "content": text}
-        ]
+        ],
+        "temperature": 0.7  # Optional parameter
     }
 
     try:
@@ -148,11 +149,12 @@ def process_with_groq(text):
         # Extract the AI response
         response_data = response.json()
         
-        # Assuming the response has a field 'choices' with the result
+        # Correct way to access Groq's response (different from OpenAI's structure)
         return response_data['choices'][0]['message']['content']
     
     except requests.exceptions.RequestException as e:
         print(f"Error during API request: {e}")
+        print(f"Response content: {response.content if 'response' in locals() else 'No response'}")
         return None
 
 
