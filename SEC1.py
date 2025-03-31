@@ -122,7 +122,7 @@ def extract_section_text(doc_url, start_section=None, end_section=None):
         return None
 
 # Set up the groq API configuration
-API_KEY = "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"
+API_KEY = "key_01jqnwxgs0e2vskffdce1dvnyn"
 API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 # Function to send a message to the groq API and get a response
