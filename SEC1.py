@@ -66,6 +66,7 @@ def create_zip(filings):
     return zip_buffer
 
 # Function to extract SEC document sections without NLP
+# Function to extract SEC document sections without NLP
 def extract_section(filing_url, section_name, end_marker):
     filing_url = validate_url(filing_url)
     if not filing_url:
@@ -85,14 +86,18 @@ def extract_section(filing_url, section_name, end_marker):
 
     for element in soup.find_all(["p", "div", "table"]):
         text = element.get_text().strip()
-        if section_name and section_name in text:
+        # Start capturing when section_name is found
+        if section_name and section_name.lower() in text.lower():
             capturing = True
+        # Capture the section
         if capturing:
-            extracted_section.append(element.prettify())
-        if end_marker and end_marker in text:
+            extracted_section.append(text)
+        # Stop capturing when end_marker is found
+        if end_marker and end_marker.lower() in text.lower():
             break
 
     return extracted_section if extracted_section else None
+
 
 # Streamlit UI
 st.title("📊 SEC Filing & Document Extractor")
