@@ -105,39 +105,51 @@ if task == "Task 1: 10-Q Filings":
 
                 st.success(f"Found {len(df)} filings!")
                 
-                # Filter results based on user input
-                st.write("### Filter Results")
-                query = st.text_input("Search by CIK, Form Type, or Date")
-                if query:
-                    df = df[df.apply(lambda row: query.lower() in str(row).lower(), axis=1)]
-                    st.info(f"Filtered to {len(df)} filings")
+                # Store the unfiltered dataframe in session state
+                st.session_state.unfiltered_df = df
+                st.session_state.filtered_df = df.copy()
 
-                st.dataframe(df)
+    # Display the filter and results outside the button click block
+    if 'unfiltered_df' in st.session_state:
+        st.write("### Filter Results")
+        query = st.text_input("Search by CIK, Form Type, or Date")
+        
+        if query:
+            # Filter the dataframe based on the query
+            filtered_df = st.session_state.unfiltered_df[
+                st.session_state.unfiltered_df.apply(
+                    lambda row: query.lower() in str(row).lower(), 
+                    axis=1
+                )
+            ]
+            st.session_state.filtered_df = filtered_df
+            st.info(f"Filtered to {len(filtered_df)} filings")
+        else:
+            st.session_state.filtered_df = st.session_state.unfiltered_df.copy()
 
-                # Download options for CSV
-                col1, col2 = st.columns(2)
-                with col1:
-                    if st.button("📥 Download as CSV"):
-                        # Ensure CSV download works
-                        csv = df.to_csv(index=False).encode('utf-8')
-                        st.download_button(
-                            label="Download CSV",
-                            data=csv,
-                            file_name=f"10Q_filings_{year}_Q{'-'.join(map(str, quarters))}.csv",
-                            mime='text/csv'
-                        )
-                with col2:
-                    if st.button("📥 Download as TXT"):
-                        # Ensure TXT download works
-                        txt = df.to_string(index=False).encode('utf-8')
-                        st.download_button(
-                            label="Download TXT",
-                            data=txt,
-                            file_name=f"10Q_filings_{year}_Q{'-'.join(map(str, quarters))}.txt",
-                            mime='text/plain'
-                        )
-            else:
-                st.error("No filings found for the selected criteria.")
+        # Display the current dataframe (filtered or unfiltered)
+        st.dataframe(st.session_state.filtered_df)
+
+        # Download options for CSV and TXT
+        col1, col2 = st.columns(2)
+        with col1:
+            csv = st.session_state.filtered_df.to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Download as CSV",
+                data=csv,
+                file_name=f"10Q_filings_{year}_Q{'-'.join(map(str, quarters))}.csv",
+                mime='text/csv',
+                key='csv_download'
+            )
+        with col2:
+            txt = st.session_state.filtered_df.to_string(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Download as TXT",
+                data=txt,
+                file_name=f"10Q_filings_{year}_Q{'-'.join(map(str, quarters))}.txt",
+                mime='text/plain',
+                key='txt_download'
+            )
 
 elif task == "Task 2: Extract Document":
     st.header("🔍 Extract Document from 10-Q URL")
