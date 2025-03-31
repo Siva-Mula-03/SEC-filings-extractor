@@ -188,3 +188,19 @@ if task == "Task 1: 10-Q Filings":
                     file_name=f"10Q_filings_{year}_Q{'-'.join(map(str, quarters))}.txt",
                     mime='text/plain'
                 )
+    elif task == "Task 2: URL Text Extraction":
+    st.header("🔍 URL Text Extraction")
+    url = st.text_input("Enter URL to Extract Text", "https://www.sec.gov/")
+
+    if st.button("Extract Text"):
+        with st.spinner("Extracting text..."):
+            doc_url = get_document_url(url)
+            if doc_url:
+                section_text = extract_section_text(doc_url)
+                if section_text:
+                    st.write("### Extracted Text")
+                    st.text_area("Text Content", "\n".join(section_text), height=300)
+                else:
+                    st.warning("No text found in the document.")
+            else:
+                st.warning("Document URL not found.")
