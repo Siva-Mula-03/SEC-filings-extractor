@@ -5,6 +5,9 @@ import zipfile
 import io
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
+import nltk
+nltk.download('punkt')
+
 
 # SEC Base URL
 BASE_URL = "https://www.sec.gov"
