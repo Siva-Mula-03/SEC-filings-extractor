@@ -129,7 +129,10 @@ st.title("📊 SEC Extract")
 with st.sidebar:
     st.header("Configuration")
     task = st.radio("Select Task", ["Task 1: 10-Q Filings", "Task 2: URL Text Extraction"])
-    
+
+# Debugging task selection
+st.write(f"Task selected: {task}")
+
 if task == "Task 1: 10-Q Filings":
     st.header("🔍 Fetch 10-Q Filings")
     col1, col2 = st.columns([1, 2])
@@ -203,6 +206,9 @@ elif task == "Task 2: Document Extraction":
     start_section = st.text_input("Enter start section (optional)")
     end_section = st.text_input("Enter end section (optional)")
 
+    # Debugging: Checking URL and sections input
+    st.write(f"URL: {doc_url}, Start: {start_section}, End: {end_section}")
+
     if st.button("Extract Section"):
         with st.spinner("Extracting document..."):
             content = extract_section_text(doc_url, start_section, end_section)
@@ -215,3 +221,7 @@ elif task == "Task 2: Document Extraction":
                 if ai_results:
                     st.write("### AI Analysis Result")
                     st.markdown(ai_results)
+                else:
+                    st.warning("AI processing did not return results.")
+            else:
+                st.warning("No content extracted from the document.")
