@@ -188,7 +188,8 @@ if task == "Task 1: 10-Q Filings":
                     file_name=f"10Q_filings_{year}_Q{'-'.join(map(str, quarters))}.txt",
                     mime='text/plain'
                 )
-   elif task == "Task 2: Document Extraction":
+
+elif task == "Task 2: Document Extraction":
     st.header("📑 Extract SEC Document Section")
     
     with st.expander("ℹ️ How to use", expanded=True):
@@ -211,7 +212,6 @@ if task == "Task 1: 10-Q Filings":
                 
                 st.write("### Processing with AI...")
                 ai_results = process_with_groq(content)
-                print(ai_results)
                 if ai_results:
                     st.write("### AI Analysis Result")
                     st.markdown(ai_results)
