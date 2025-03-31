@@ -134,7 +134,7 @@ def process_with_groq(text):
     
     # Prepare the payload according to the Groq documentation
     data = {
-        "model": "llama3-70b-8192",  # Updated model name (as of current Groq docs)
+        "model": "llama-3.3-70b-versatile",  
         "messages": [
             {"role": "user", "content": text}
         ],
