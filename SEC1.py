@@ -132,28 +132,36 @@ def process_with_groq(text):
         'Content-Type': 'application/json'
     }
     
-    # Prepare the payload according to Groq documentation
     data = {
-        "model": "llama3-70b-8192",  #  model name
+        "model": "llama-3.3-70b-versatile",  # Correct model name
         "messages": [
             {"role": "user", "content": text}
         ],
-        "temperature": 0.7  # Optional parameter for creativity
+        "temperature": 0.7  # Optional parameter
     }
 
     try:
-        # Send POST request to Groq API
-        response = requests.post(API_URL, headers=headers, json=data)
+        # Send POST request with a timeout of 30 seconds
+        response = requests.post(API_URL, headers=headers, json=data, timeout=30)
+        
+        # Print response status code
+        print("Response Status Code:", response.status_code)
         
         # Check if the request was successful (status code 200)
         response.raise_for_status()  # Raises HTTPError for bad responses
         
-        # Extract the AI response (Groq's structure)
+        # Log the raw API response for debugging
+        print("API Response:", response.text)
+
         response_data = response.json()
+
+        # Check if the expected 'choices' are present in the response
+        if 'choices' in response_data and len(response_data['choices']) > 0:
+            return response_data['choices'][0]['message']['content']
+        else:
+            print("No content in API response")
+            return None
         
-        # Assuming the response structure is as expected
-        return response_data['choices'][0]['message']['content']
-    
     except requests.exceptions.RequestException as e:
         print(f"Error during API request: {e}")
         print(f"Response content: {response.content if 'response' in locals() else 'No response'}")
