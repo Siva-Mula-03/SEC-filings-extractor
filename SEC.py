@@ -7,6 +7,7 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 import nltk
 from nltk.tokenize import sent_tokenize
+import re
 
 # Ensure necessary nltk data is downloaded
 nltk.download('punkt')
@@ -16,7 +17,7 @@ BASE_URL = "https://www.sec.gov"
 
 # Headers to avoid 403 Forbidden errors
 HEADERS = {
-    'User-Agent': 'Siva Nehesh - For Research - siva.nehesh@example.com',
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'Accept-Encoding': 'gzip, deflate',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     'Connection': 'keep-alive'
@@ -32,26 +33,29 @@ def fetch_10q_filings(year, quarter):
         
         for line in response.text.split('\n'):
             if '10-Q' in line and 'edgar/data/' in line:
-                parts = line.split('|')
-                if len(parts) >= 5:
-                    filings.append({
-                        "Company": parts[1],
-                        "CIK": parts[0],
-                        "Date": parts[3],
-                        "URL": urljoin(BASE_URL, parts[4])
-                    })
+                parts = line.split()
+                for part in parts:
+                    if part.startswith('/Archives/edgar/data/'):
+                        filings.append({
+                            "Company": "Unknown",  # Company names are not always available in index file
+                            "CIK": "Unknown",
+                            "Date": "Unknown",
+                            "URL": urljoin(BASE_URL, part)
+                        })
+                        break
         return filings
     except requests.exceptions.RequestException as e:
         st.error(f"Error fetching filings: {e}")
         return []
 
-# Function to create ZIP file
+# Function to create ZIP file for filings
 def create_zip(filings):
     zip_buffer = io.BytesIO()
-    with zipfile.ZipFile(zip_buffer, 'w') as zip_file:
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
         for filing in filings:
-            data = requests.get(filing["URL"], headers=HEADERS).text
-            zip_file.writestr(f"{filing['Company']}_{filing['Date']}.txt", data)
+            response = requests.get(filing["URL"], headers=HEADERS, stream=True)
+            if response.status_code == 200:
+                zip_file.writestr(f"{filing['Company']}_{filing['Date']}.txt", response.text)
     zip_buffer.seek(0)
     return zip_buffer
 
@@ -59,17 +63,19 @@ def create_zip(filings):
 def extract_section(filing_url, section_name, end_marker):
     response = requests.get(filing_url, headers=HEADERS)
     soup = BeautifulSoup(response.text, "html.parser")
-    text_lines = soup.get_text("\n").split("\n")
-    extracted_section, start_idx = [], None
     
-    for i, line in enumerate(text_lines):
-        clean_line = line.strip()
-        if section_name and section_name in clean_line and start_idx is None:
-            start_idx = i
-        if start_idx is not None:
-            extracted_section.append(clean_line)
-        if end_marker and end_marker in clean_line and start_idx is not None:
+    extracted_section = []
+    capturing = False
+    
+    for element in soup.find_all(["p", "div", "table"]):  # Preserve structured content
+        text = element.get_text().strip()
+        if section_name in text:
+            capturing = True
+        if capturing:
+            extracted_section.append(element.prettify())  # Use prettify() to maintain structure
+        if end_marker in text:
             break
+
     return extracted_section if extracted_section else None
 
 # NLP-based extraction for financial highlights
@@ -77,9 +83,15 @@ def smart_extract(filing_url):
     response = requests.get(filing_url, headers=HEADERS)
     text = BeautifulSoup(response.text, "html.parser").get_text()
     sentences = sent_tokenize(text)
+
+    # Extract only financial and risk-related content
     keywords = ["Revenue", "Net Income", "EPS", "Risk Factors", "Management Discussion"]
-    extracted = [s for s in sentences if any(k in s for k in keywords)]
-    return extracted
+    financial_data = [s for s in sentences if any(k in s for k in keywords)]
+
+    # Use regex to extract financial numbers
+    financial_data += [s for s in sentences if re.search(r"\$\d{1,3}(?:,\d{3})*(?:\.\d{2})?", s)]
+
+    return financial_data
 
 # Streamlit UI
 st.title("📊 SEC Filing & Document Extractor")
