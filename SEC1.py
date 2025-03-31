@@ -126,26 +126,39 @@ def extract_section_text(doc_url, start_section=None, end_section=None):
 
 def process_with_deepseek(text):
     try:
-        url = "https://api.deepseek.com/v1"  # DeepSeek API endpoint
+        url = "https://api.deepseek.com/v1/chat/completions"  # Correct endpoint
         headers = {
             "Authorization": f"Bearer {API_KEY}",
             "Content-Type": "application/json"
         }
+        
+        # Truncate text if too long (DeepSeek may have token limits)
+        processed_text = ' '.join(text[:3000]) if len(text) > 3000 else ' '.join(text)
+        
         payload = {
-            "text": ' '.join(text[:3000]) if len(text) > 3000 else ' '.join(text)
+            "model": "deepseek-chat",  # Specify the model
+            "messages": [
+                {"role": "user", "content": processed_text}
+            ],
+            "temperature": 0.7,  # Adjust creativity (0-1)
         }
 
-        # Sending POST request to DeepSeek API
         response = requests.post(url, headers=headers, json=payload)
-        response.raise_for_status()
+        response.raise_for_status()  # Raise error for bad status codes
         
-        # Assuming DeepSeek API returns the results as a markdown table
         result = response.json()
-        if "table" in result:
-            return result["table"]
+        
+        # Extract the AI's reply (assuming it's in standard chat-completion format)
+        if "choices" in result and len(result["choices"]) > 0:
+            ai_response = result["choices"][0]["message"]["content"]
+            return ai_response  # Return the generated text
+        
+        return None
+    except requests.exceptions.RequestException as e:
+        st.error(f"API request failed: {str(e)}")
         return None
     except Exception as e:
-        st.error(f"AI processing error: {str(e)}")
+        st.error(f"Processing error: {str(e)}")
         return None
 
 # Streamlit UI
