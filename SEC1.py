@@ -9,6 +9,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
 import time
+import os
 
 # SEC Base URL
 BASE_URL = "https://www.sec.gov"
@@ -87,21 +88,37 @@ def get_document_url(filing_url):
 def setup_selenium_driver():
     """Setup and return a Selenium WebDriver with appropriate options."""
     chrome_options = Options()
-    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--headless=new")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("--disable-extensions")
+    chrome_options.add_argument("--remote-debugging-port=9222")
     chrome_options.add_argument(f"user-agent={HEADERS['User-Agent']}")
     
+    # Set binary location if in specific environment
+    if os.path.exists("/usr/bin/chromium-browser"):
+        chrome_options.binary_location = "/usr/bin/chromium-browser"
+    
     try:
+        # Try with ChromeDriverManager first
         driver = webdriver.Chrome(
             service=Service(ChromeDriverManager().install()),
             options=chrome_options
         )
         return driver
     except Exception as e:
-        st.error(f"Error setting up Selenium: {str(e)}")
-        return None
+        st.warning(f"ChromeDriverManager failed, trying direct path: {str(e)}")
+        try:
+            # Fallback to direct chromedriver path
+            driver = webdriver.Chrome(
+                service=Service('/usr/local/bin/chromedriver'),
+                options=chrome_options
+            )
+            return driver
+        except Exception as e:
+            st.error(f"Failed to setup Selenium: {str(e)}")
+            return None
 
 def extract_section_text_selenium(doc_url, start_section=None, end_section=None):
     """Extract text from document using Selenium."""
@@ -111,7 +128,7 @@ def extract_section_text_selenium(doc_url, start_section=None, end_section=None)
     
     try:
         driver.get(doc_url)
-        time.sleep(2)  # Allow page to load
+        time.sleep(3)  # Allow more time for page to load
         
         # Get page source and parse with BeautifulSoup
         soup = BeautifulSoup(driver.page_source, 'html.parser')
@@ -211,7 +228,7 @@ def process_with_groq(text):
     }
     
     data = {
-        "model": "groq-chat",  # Assuming this is the model you want to use
+        "model": "groq-chat",
         "messages": [
             {"role": "system", "content": "You are a helpful assistant."},
             {"role": "user", "content": text}
@@ -220,15 +237,12 @@ def process_with_groq(text):
 
     try:
         response = requests.post(API_URL, headers=headers, json=data)
-        response.raise_for_status()  # Raise an exception for HTTP errors
-        print(f"API response status: {response.status_code}")  # Log status
+        response.raise_for_status()
         response_data = response.json()
-        print(f"Response Data: {response_data}")  # Log response data
-
         return response_data['choices'][0]['message']['content']
     
     except requests.exceptions.RequestException as e:
-        print(f"Error during API request: {e}")
+        st.error(f"Error during API request: {e}")
         return None
 
 # Streamlit UI
@@ -315,13 +329,13 @@ elif task == "Task 2: Document Extraction":
     start_section = st.text_input("Enter start section (optional)")
     end_section = st.text_input("Enter end section (optional)")
 
-    extraction_method = st.radio("Extraction Method", ["Selenium (recommended)", "Requests (fallback)"], index=0)
-
     if st.button("Extract Section"):
         with st.spinner("Extracting document..."):
-            if extraction_method == "Selenium (recommended)":
-                content = extract_section_text_selenium(doc_url, start_section, end_section)
-            else:
+            # First try with Selenium
+            content = extract_section_text_selenium(doc_url, start_section, end_section)
+            
+            if not content:
+                st.warning("Selenium extraction failed, trying with requests...")
                 content = extract_section_text(doc_url, start_section, end_section)
                 
             if content:
@@ -333,3 +347,5 @@ elif task == "Task 2: Document Extraction":
                 if ai_results:
                     st.write("### AI Analysis Result")
                     st.markdown(ai_results)
+            else:
+                st.error("Failed to extract content from the document")
