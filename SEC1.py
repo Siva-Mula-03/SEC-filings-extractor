@@ -131,9 +131,9 @@ def process_with_groq(text):
         'Authorization': f'Bearer {API_KEY}',
         'Content-Type': 'application/json'
     }
-    
+
     data = {
-        "model": "llama-3.3-70b-versatile",  # Correct model name
+        "model": "llama-3.3-70b-versatile",  # Model name as per the documentation
         "messages": [
             {"role": "user", "content": text}
         ],
@@ -143,28 +143,25 @@ def process_with_groq(text):
     try:
         # Send POST request with a timeout of 30 seconds
         response = requests.post(API_URL, headers=headers, json=data, timeout=30)
-        
-        # Print response status code
+
+        # Log the response status code and response body for debugging
         print("Response Status Code:", response.status_code)
-        
+        print("Response Text:", response.text)
+
         # Check if the request was successful (status code 200)
-        response.raise_for_status()  # Raises HTTPError for bad responses
-        
-        # Log the raw API response for debugging
-        print("API Response:", response.text)
+        response.raise_for_status()  # Will raise an exception for 4xx or 5xx status codes
 
         response_data = response.json()
 
-        # Check if the expected 'choices' are present in the response
+        # Check if 'choices' are in the response and return content
         if 'choices' in response_data and len(response_data['choices']) > 0:
             return response_data['choices'][0]['message']['content']
         else:
-            print("No content in API response")
+            print("Unexpected response structure:", json.dumps(response_data, indent=2))
             return None
-        
+
     except requests.exceptions.RequestException as e:
         print(f"Error during API request: {e}")
-        print(f"Response content: {response.content if 'response' in locals() else 'No response'}")
         return None
 
 
