@@ -44,21 +44,34 @@ def get_document_url(filing_url):
         response.raise_for_status()
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # Find the complete submission text file
-        doc_link = None
-        for link in soup.find_all('a', href=True):
-            if link['href'].endswith('.htm') or link['href'].endswith('.html'):
-                doc_link = urljoin(filing_url, link['href'])
-                break
-        
-        if not doc_link:
-            # Alternative approach for some SEC filings
-            for link in soup.find_all('a', href=True):
-                if 'ix?doc=' in link['href']:
-                    doc_link = urljoin(filing_url, link['href'])
+        # Find the table with filing documents
+        documents_table = soup.find('table', {'class': 'tableFile'})
+        if not documents_table:
+            st.error("Could not find documents table in the filing")
+            return None
+            
+        # Find the primary document (usually 10-Q)
+        primary_doc = None
+        for row in documents_table.find_all('tr')[1:]:  # Skip header row
+            cols = row.find_all('td')
+            if len(cols) >= 3:
+                doc_type = cols[3].text.strip()
+                if '10-Q' in doc_type or '10Q' in doc_type:
+                    doc_href = cols[2].find('a')['href']
+                    primary_doc = urljoin(filing_url, doc_href)
                     break
         
-        return doc_link
+        if not primary_doc:
+            # If no 10-Q found, get the first HTML document
+            for row in documents_table.find_all('tr')[1:]:
+                cols = row.find_all('td')
+                if len(cols) >= 3:
+                    doc_href = cols[2].find('a')['href']
+                    if doc_href.endswith('.htm') or doc_href.endswith('.html'):
+                        primary_doc = urljoin(filing_url, doc_href)
+                        break
+        
+        return primary_doc
     except Exception as e:
         st.error(f"Error finding document URL: {str(e)}")
         return None
@@ -68,14 +81,21 @@ def extract_section_text(doc_url, start_section=None, end_section=None):
         response = requests.get(doc_url, headers=HEADERS)
         response.raise_for_status()
         
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # Remove unwanted elements
-        for element in soup(['script', 'style', 'meta', 'link', 'nav']):
-            element.decompose()
-        
-        text = soup.get_text('\n', strip=True)
-        lines = [line.strip() for line in text.split('\n') if line.strip()]
+        # Handle both HTML and plain text documents
+        if doc_url.endswith('.txt'):
+            # For plain text filings
+            text = response.text
+            lines = [line.strip() for line in text.split('\n') if line.strip()]
+        else:
+            # For HTML filings
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # Remove unwanted elements
+            for element in soup(['script', 'style', 'meta', 'link', 'nav', 'header', 'footer']):
+                element.decompose()
+            
+            text = soup.get_text('\n', strip=True)
+            lines = [line.strip() for line in text.split('\n') if line.strip()]
         
         if not start_section and not end_section:
             return lines
@@ -84,14 +104,16 @@ def extract_section_text(doc_url, start_section=None, end_section=None):
         end_idx = len(lines)
         
         if start_section:
+            start_pattern = re.compile(rf'\b{re.escape(start_section)}\b', re.IGNORECASE)
             for i, line in enumerate(lines):
-                if re.search(rf'\b{re.escape(start_section)}\b', line, re.IGNORECASE):
+                if start_pattern.search(line):
                     start_idx = i
                     break
         
         if end_section:
+            end_pattern = re.compile(rf'\b{re.escape(end_section)}\b', re.IGNORECASE)
             for i, line in enumerate(lines[start_idx:], start=start_idx):
-                if re.search(rf'\b{re.escape(end_section)}\b', line, re.IGNORECASE):
+                if end_pattern.search(line):
                     end_idx = i
                     break
         
