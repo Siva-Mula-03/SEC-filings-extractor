@@ -16,10 +16,6 @@ HEADERS = {
     'Connection': 'keep-alive'
 }
 
-# Set up the groq API configuration
-API_KEY = "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"
-API_URL = "https://api.groq.com/openai/v1/chat/completions"
-
 def fetch_10q_filings(year, quarter):
     sec_url = f"{BASE_URL}/Archives/edgar/full-index/{year}/QTR{quarter}/crawler.idx"
     try:
@@ -124,6 +120,10 @@ def extract_section_text(doc_url, start_section=None, end_section=None):
     except Exception as e:
         st.error(f"Extraction error: {str(e)}")
         return None
+
+# Set up the groq API configuration
+API_KEY = "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"
+API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 # Function to send a message to the groq API and get a response
 def process_with_groq(text):
