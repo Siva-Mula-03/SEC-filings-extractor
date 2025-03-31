@@ -4,7 +4,7 @@ import pandas as pd
 import zipfile
 import io
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse
 import nltk
 from nltk.tokenize import sent_tokenize
 import re
@@ -18,10 +18,19 @@ BASE_URL = "https://www.sec.gov"
 # Headers to avoid 403 Forbidden errors
 HEADERS = {
     'User-Agent': 'Siva Nehesh - For Research - siva.nehesh@example.com',
-        'Accept-Encoding': 'gzip, deflate',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Connection': 'keep-alive'
+    'Accept-Encoding': 'gzip, deflate',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Connection': 'keep-alive'
 }
+
+# Validate and fix SEC URLs
+def validate_url(url):
+    if not url.startswith("http"):
+        url = "https://" + url.lstrip("/")
+    parsed = urlparse(url)
+    if not parsed.scheme or not parsed.netloc:
+        return None  # Invalid URL
+    return url
 
 # Function to fetch and filter 10-Q filings
 def fetch_10q_filings(year, quarter):
@@ -30,14 +39,14 @@ def fetch_10q_filings(year, quarter):
         response = requests.get(sec_url, headers=HEADERS)
         response.raise_for_status()
         filings = []
-        
+
         for line in response.text.split('\n'):
             if '10-Q' in line and 'edgar/data/' in line:
                 parts = line.split()
                 for part in parts:
                     if part.startswith('/Archives/edgar/data/'):
                         filings.append({
-                            "Company": "Unknown",  # Company names are not always available in index file
+                            "Company": "Unknown",
                             "CIK": "Unknown",
                             "Date": "Unknown",
                             "URL": urljoin(BASE_URL, part)
@@ -53,7 +62,10 @@ def create_zip(filings):
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
         for filing in filings:
-            response = requests.get(filing["URL"], headers=HEADERS, stream=True)
+            fixed_url = validate_url(filing["URL"])
+            if not fixed_url:
+                continue  # Skip invalid URLs
+            response = requests.get(fixed_url, headers=HEADERS, stream=True)
             if response.status_code == 200:
                 zip_file.writestr(f"{filing['Company']}_{filing['Date']}.txt", response.text)
     zip_buffer.seek(0)
@@ -61,18 +73,28 @@ def create_zip(filings):
 
 # Function to extract SEC document sections
 def extract_section(filing_url, section_name, end_marker):
-    response = requests.get(filing_url, headers=HEADERS)
+    filing_url = validate_url(filing_url)
+    if not filing_url:
+        st.error("Invalid SEC filing URL.")
+        return None
+
+    try:
+        response = requests.get(filing_url, headers=HEADERS)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Request failed: {e}")
+        return None
+
     soup = BeautifulSoup(response.text, "html.parser")
-    
     extracted_section = []
     capturing = False
-    
-    for element in soup.find_all(["p", "div", "table"]):  # Preserve structured content
+
+    for element in soup.find_all(["p", "div", "table"]):
         text = element.get_text().strip()
         if section_name in text:
             capturing = True
         if capturing:
-            extracted_section.append(element.prettify())  # Use prettify() to maintain structure
+            extracted_section.append(element.prettify())
         if end_marker in text:
             break
 
@@ -80,15 +102,23 @@ def extract_section(filing_url, section_name, end_marker):
 
 # NLP-based extraction for financial highlights
 def smart_extract(filing_url):
-    response = requests.get(filing_url, headers=HEADERS)
+    filing_url = validate_url(filing_url)
+    if not filing_url:
+        st.error("Invalid SEC filing URL.")
+        return None
+
+    try:
+        response = requests.get(filing_url, headers=HEADERS)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Request failed: {e}")
+        return None
+
     text = BeautifulSoup(response.text, "html.parser").get_text()
     sentences = sent_tokenize(text)
 
-    # Extract only financial and risk-related content
     keywords = ["Revenue", "Net Income", "EPS", "Risk Factors", "Management Discussion"]
     financial_data = [s for s in sentences if any(k in s for k in keywords)]
-
-    # Use regex to extract financial numbers
     financial_data += [s for s in sentences if re.search(r"\$\d{1,3}(?:,\d{3})*(?:\.\d{2})?", s)]
 
     return financial_data
@@ -101,19 +131,19 @@ if task == "Task 1: 10-Q Filings":
     st.header("🔍 Fetch 10-Q Filings")
     year = st.number_input("Enter Year", min_value=1995, max_value=2025, value=2024)
     quarters = st.multiselect("Select Quarters", [1, 2, 3, 4], default=[1])
-    
+
     if st.button("Fetch Filings"):
         all_filings = []
         for q in quarters:
             all_filings.extend(fetch_10q_filings(year, q))
-        
+
         if all_filings:
             df = pd.DataFrame(all_filings)
             st.write("### Filter Results")
             query = st.text_input("Search by CIK, Company, or Date")
             if query:
                 df = df[df.apply(lambda row: query.lower() in str(row).lower(), axis=1)]
-            
+
             st.dataframe(df)
             zip_buffer = create_zip(all_filings)
             st.download_button("📥 Download ZIP", data=zip_buffer, file_name="10Q_filings.zip")
@@ -125,13 +155,13 @@ elif task == "Task 2: Document Extraction":
     filing_url = st.text_input("Enter SEC Filing URL")
     section_name = st.text_input("Start Section (Leave blank for full extraction)")
     end_marker = st.text_input("End Section (Leave blank for full extraction)")
-    
+
     if st.button("Extract Section"):
         if section_name and end_marker:
             extracted_text = extract_section(filing_url, section_name, end_marker)
         else:
             extracted_text = smart_extract(filing_url)
-        
+
         if extracted_text:
             df = pd.DataFrame({"Extracted Text": extracted_text})
             st.write("### Extracted Information")
