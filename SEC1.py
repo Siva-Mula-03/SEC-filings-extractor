@@ -93,6 +93,9 @@ if task == "Task 1: 10-Q Filings":
 
             if all_filings:
                 df = pd.DataFrame(all_filings)
+                df['Date'] = pd.to_datetime(df['Date'], errors='coerce')  # Ensure Date is in datetime format
+                df = df.sort_values(by='Date', ascending=False)  # Sort by date (descending order)
+
                 st.success(f"Found {len(df)} filings!")
                 
                 # Filter results based on user input
@@ -108,6 +111,7 @@ if task == "Task 1: 10-Q Filings":
                 col1, col2 = st.columns(2)
                 with col1:
                     if st.button("📥 Download as CSV"):
+                        # Fix for CSV download
                         csv = df.to_csv(index=False).encode('utf-8')
                         st.download_button(
                             label="Download CSV",
@@ -117,6 +121,7 @@ if task == "Task 1: 10-Q Filings":
                         )
                 with col2:
                     if st.button("📥 Download as TXT"):
+                        # Fix for TXT download
                         txt = df.to_string(index=False).encode('utf-8')
                         st.download_button(
                             label="Download TXT",
