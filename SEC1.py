@@ -16,7 +16,7 @@ HEADERS = {
     'Connection': 'keep-alive'
 }
 
-# Set up the ARLIAI API configuration
+# Set up the groq API configuration
 API_KEY = "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"
 API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
