@@ -27,7 +27,7 @@ def fetch_10q_filings(year, quarter):
                 parts = line.split()
                 if len(parts) >= 5:
                     filings.append({
-                        "Quarter": f"Q{quarter}",  # Added quarter column
+                        "Quarter": f"Q{quarter}",  # Quarter column is added here
                         "Form Type": parts[-4],
                         "CIK": parts[-3],
                         "Date": parts[-2],
@@ -122,50 +122,6 @@ def extract_section_text(doc_url, start_section=None, end_section=None):
         st.error(f"Extraction error: {str(e)}")
         return None
 
-# Set up the groq API configuration
-API_KEY = "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"
-API_URL = "https://api.groq.com/openai/v1/chat/completions"
-
-# Function to send a message to the groq API and get a response
-def process_with_groq(text):
-    headers = {
-        'Authorization': f'Bearer {API_KEY}',
-        'Content-Type': 'application/json'
-    }
-
-    data = {
-        "model": "llama-3.3-70b-versatile",  # Model name as per the documentation
-        "messages": [
-            {"role": "user", "content": str(text)}  # Ensure content is a string
-        ],
-        "temperature": 0.7  # Optional parameter
-    }
-
-    try:
-        # Send POST request with a timeout of 30 seconds
-        response = requests.post(API_URL, headers=headers, json=data, timeout=30)
-
-        # Log the response status code and response body for debugging
-        print("Response Status Code:", response.status_code)
-        print("Response Text:", response.text)
-
-        # Check if the request was successful (status code 200)
-        response.raise_for_status()  # Will raise an exception for 4xx or 5xx status codes
-
-        response_data = response.json()
-
-        # Check if 'choices' are in the response and return content
-        if 'choices' in response_data and len(response_data['choices']) > 0:
-            return response_data['choices'][0]['message']['content']
-        else:
-            print("Unexpected response structure:", json.dumps(response_data, indent=2))
-            return None
-
-    except requests.exceptions.RequestException as e:
-        print(f"Error during API request: {e}")
-        return None
-
-
 # Streamlit UI
 st.set_page_config(page_title="SEC Filing Analyzer", layout="wide")
 st.title("📊 SEC Extract")
@@ -227,27 +183,8 @@ if task == "Task 1: 10-Q Filings":
             with col2:
                 txt = st.session_state.filtered_df.to_string(index=False)
                 st.download_button(
-                    label="📥 Download as TXT",
+                    label="📥 Download as Text",
                     data=txt,
                     file_name=f"10Q_filings_{year}_Q{'-'.join(map(str, quarters))}.txt",
                     mime='text/plain'
                 )
-
-elif task == "Task 2: URL Text Extraction":
-    st.header("Extract Text from SEC Filing URL")
-    url = st.text_input("Enter SEC Filing URL")
-
-    if url:
-        st.write(f"Processing file at: {url}")
-        doc_url = get_document_url(url)
-
-        if doc_url:
-            st.write(f"Document URL found: {doc_url}")
-            section_text = extract_section_text(doc_url, start_section="Risk Factors", end_section="Legal Proceedings")
-            if section_text:
-                for line in section_text:
-                    st.write(line)
-            else:
-                st.warning("No relevant sections found in the document.")
-        else:
-            st.warning("Document URL not found.")
