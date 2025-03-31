@@ -5,9 +5,11 @@ import zipfile
 import io
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
-import nltk
-from nltk.tokenize import sent_tokenize
 import re
+import nltk
+nltk.download('punkt')
+from nltk.tokenize import sent_tokenize
+
 
 # Ensure necessary nltk data is downloaded
 nltk.download('punkt')
