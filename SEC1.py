@@ -165,7 +165,6 @@ def process_with_groq(text):
         print(f"Error during API request: {e}")
         return None
 
-
 # Streamlit UI
 st.set_page_config(page_title="SEC Filing Analyzer", layout="wide")
 st.title("📊 SEC Extract")
@@ -173,7 +172,17 @@ st.title("📊 SEC Extract")
 # Sidebar: Task Selection
 with st.sidebar:
     st.header("Configuration")
+    
+    # Task Selection
     task = st.radio("Select Task", ["Task 1: 10-Q Filings", "Task 2: URL Text Extraction"])
+
+    # Additional Option: Codes and Documentation
+    st.header("Download Files")
+    st.subheader("Available Files:")
+    st.markdown("[Combined Task 1 & Task 2 with UI (Python)](data/combined_tsk1_tsk2_with_ui.py)", unsafe_allow_html=True)
+    st.markdown("[Simple Task 1 (Python)](data/simple_task1.py)", unsafe_allow_html=True)
+    st.markdown("[Simple Task 2 (Python)](data/simple_task2.py)", unsafe_allow_html=True)
+    st.markdown("[Documentation (PDF)](data/documentation.pdf)", unsafe_allow_html=True)
 
 # Debug: Check which task is selected
 st.write(f"Selected Task: {task}")
