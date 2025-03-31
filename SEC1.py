@@ -15,137 +15,36 @@ HEADERS = {
     'Connection': 'keep-alive'
 }
 
-# Function to fetch and filter 10-Q filings for a specific year and quarter
+# Function to fetch and filter 10-Q filings
 def fetch_10q_filings(year, quarter):
-    # The URL to access the relevant quarter's data
     sec_url = f"{BASE_URL}/Archives/edgar/full-index/{year}/QTR{quarter}/crawler.idx"
     
     try:
-        # Make the HTTP request to fetch the data
         response = requests.get(sec_url, headers=HEADERS)
-        response.raise_for_status()  # Raise error for bad responses (e.g., 404)
-
+        response.raise_for_status()
         filings = []
         for line in response.text.split('\n'):
             if '10-Q' in line and 'edgar/data/' in line:
                 parts = line.split()
-                # We know the last part is URL, second-last is Date, and third-last is CIK
-                if len(parts) >= 5:  # Ensure there are enough parts in the line
-                    form_type = parts[-4]  # Form type (should be '10-Q' for our case)
-                    cik = parts[-3]
-                    date_filed = parts[-2]
-                    url = parts[-1]  # Last part is the URL
+                if len(parts) >= 5:
                     filings.append({
-                        "Form Type": form_type,
-                        "CIK": cik,
-                        "Date": date_filed,
-                        "URL": url  # Full URL as it is
+                        "Form Type": parts[-4],
+                        "CIK": parts[-3],
+                        "Date": parts[-2],
+                        "URL": parts[-1]
                     })
         return filings
     except requests.exceptions.RequestException as e:
         st.error(f"Error fetching filings: {e}")
         return []
 
-# Task 2: Extract documents based on SEC 10-Q URL
-def fetch_document_from_url(url):
-    try:
-        # Build the full URL
-        full_url = urljoin(BASE_URL, url)
-        response = requests.get(full_url, headers=HEADERS)
-        response.raise_for_status()
-
-        # Check if it's an HTML document
-        if "text/html" in response.headers['Content-Type']:
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
-            # Find the document link
-            doc_link = None
-            for link in soup.find_all("a", href=True):
-                if ".txt" in link['href'] or ".htm" in link['href'] or ".html" in link['href']:
-                    doc_link = urljoin(full_url, link['href'])
-                    break
-            
-            if doc_link:
-                # Fetch the actual document content
-                doc_response = requests.get(doc_link, headers=HEADERS)
-                doc_response.raise_for_status()
-                
-                # Parse the document content
-                doc_soup = BeautifulSoup(doc_response.text, 'html.parser')
-                
-                # Extract key information sections
-                info_sections = {
-                    "COMPANY INFORMATION": [],
-                    "FILING INFORMATION": [],
-                    "FINANCIAL DATA": [],
-                    "BUSINESS OVERVIEW": []
-                }
-                
-                # Find all tables in the document
-                tables = doc_soup.find_all('table')
-                
-                # Parse tables for key information
-                for table in tables:
-                    rows = table.find_all('tr')
-                    for row in rows:
-                        cells = row.find_all(['th', 'td'])
-                        if len(cells) == 2:  # Key-value pairs
-                            key = cells[0].get_text(strip=True).upper()
-                            value = cells[1].get_text(strip=True)
-                            
-                            # Categorize the information
-                            if 'COMPANY' in key or 'NAME' in key or 'ADDRESS' in key:
-                                info_sections["COMPANY INFORMATION"].append((key, value))
-                            elif 'FILING' in key or 'DATE' in key or 'PERIOD' in key:
-                                info_sections["FILING INFORMATION"].append((key, value))
-                            elif 'REVENUE' in key or 'INCOME' in key or 'ASSET' in key:
-                                info_sections["FINANCIAL DATA"].append((key, value))
-                            else:
-                                info_sections["BUSINESS OVERVIEW"].append((key, value))
-                
-                # Display the information in pretty tables
-                st.success("Document found! Here's the extracted information:")
-                
-                for section, items in info_sections.items():
-                    if items:  # Only show sections with content
-                        st.subheader(section)
-                        
-                        # Create a dataframe for better display
-                        df = pd.DataFrame(items, columns=["Field", "Value"])
-                        
-                        # Apply some styling
-                        st.dataframe(
-                            df.style
-                            .set_properties(**{'text-align': 'left'})
-                            .set_table_styles([{
-                                'selector': 'th',
-                                'props': [('background-color', '#f0f2f6'), 
-                                         ('font-weight', 'bold')]
-                            }]),
-                            height=min(len(items)*35 + 35, 500),  # Dynamic height
-                            use_container_width=True
-                        )
-                
-                st.markdown(f"[Download Full Document]({doc_link})")
-                return doc_link
-            else:
-                st.warning("No document link found on the page.")
-                return None
-        else:
-            st.warning("The URL doesn't point to an HTML document.")
-            return None
-            
-    except requests.exceptions.RequestException as e:
-        st.error(f"Error fetching document: {e}")
-        return None
+# Document extraction functions
 def extract_section(url, start_section=None, end_section=None):
     try:
-        # Build the full URL
         full_url = urljoin(BASE_URL, url)
         response = requests.get(full_url, headers=HEADERS)
         response.raise_for_status()
 
-        # Find the document link
         soup = BeautifulSoup(response.text, 'html.parser')
         doc_link = None
         for link in soup.find_all("a", href=True):
@@ -156,19 +55,14 @@ def extract_section(url, start_section=None, end_section=None):
         if not doc_link:
             return None
 
-        # Fetch the actual document content
         doc_response = requests.get(doc_link, headers=HEADERS)
         doc_response.raise_for_status()
         doc_soup = BeautifulSoup(doc_response.text, 'html.parser')
-        
-        # Extract all text content
         all_text = doc_soup.get_text('\n', strip=True).split('\n')
         
-        # If no sections specified, return all text
         if not start_section and not end_section:
             return [line for line in all_text if line.strip()]
         
-        # Find start and end markers
         start_idx = 0
         end_idx = len(all_text)
         
@@ -190,10 +84,9 @@ def extract_section(url, start_section=None, end_section=None):
         st.error(f"Extraction error: {str(e)}")
         return None
 
-
 # Streamlit UI
 st.title("📊 SEC Filing & Document Extractor")
-task = st.sidebar.radio("Select Task", ["Task 1: 10-Q Filings", "Task 2: Extract Document"])
+task = st.sidebar.radio("Select Task", ["Task 1: 10-Q Filings", "Task 2: Document Extraction"])
 
 if task == "Task 1: 10-Q Filings":
     st.header("🔍 Fetch 10-Q Filings")
@@ -203,7 +96,7 @@ if task == "Task 1: 10-Q Filings":
     with col2:
         quarters = st.multiselect("Select Quarters", [1, 2, 3, 4], default=[1])
 
-    if st.button("Fetch Filings", key="fetch_btn"):
+    if st.button("Fetch Filings"):
         with st.spinner("Fetching filings..."):
             all_filings = []
             for q in quarters:
@@ -213,28 +106,16 @@ if task == "Task 1: 10-Q Filings":
 
             if all_filings:
                 df = pd.DataFrame(all_filings)
-                
-                # Ensure Date is in datetime format
-                df['Date'] = pd.to_datetime(df['Date'], errors='coerce')
-                
-                # Remove time (00:00:00) from the Date
-                df['Date'] = df['Date'].dt.date
-                
-                # Sort by Date in descending order
+                df['Date'] = pd.to_datetime(df['Date'], errors='coerce').dt.date
                 df = df.sort_values(by='Date', ascending=False)
-
-                st.success(f"Found {len(df)} filings!")
-                
-                # Store the dataframe in session state
                 st.session_state.df = df
                 st.session_state.filtered_df = df.copy()
+                st.success(f"Found {len(df)} filings!")
 
-    # Display filter and results if dataframe exists
     if 'df' in st.session_state:
         st.write("### Filter Results")
-        query = st.text_input("Search by CIK, Form Type, or Date", key="search_query")
+        query = st.text_input("Search by CIK, Form Type, or Date")
         
-        # Apply filter when query changes
         if query:
             st.session_state.filtered_df = st.session_state.df[
                 st.session_state.df.apply(
@@ -246,14 +127,11 @@ if task == "Task 1: 10-Q Filings":
         else:
             st.session_state.filtered_df = st.session_state.df.copy()
 
-        # Display the current dataframe
         st.dataframe(st.session_state.filtered_df)
 
-        # Download buttons (always visible if data exists)
         if not st.session_state.filtered_df.empty:
             col1, col2 = st.columns(2)
             with col1:
-                # CSV Download
                 csv = st.session_state.filtered_df.to_csv(index=False).encode('utf-8')
                 st.download_button(
                     label="📥 Download as CSV",
@@ -263,7 +141,6 @@ if task == "Task 1: 10-Q Filings":
                     key='csv_download'
                 )
             with col2:
-                # TXT Download
                 txt = st.session_state.filtered_df.to_string(index=False).encode('utf-8')
                 st.download_button(
                     label="📥 Download as TXT",
@@ -295,19 +172,16 @@ elif task == "Task 2: Document Extraction":
                 if extracted_text:
                     st.success(f"Extracted {len(extracted_text)} lines of text!")
                     
-                    # Create DataFrame with line numbers
                     df = pd.DataFrame({
                         'Line': range(1, len(extracted_text)+1),
                         'Content': extracted_text
                     })
                     
-                    # Display first 100 lines with option to show more
                     st.dataframe(df.head(100), height=400)
                     
                     if len(extracted_text) > 100:
-                        st.info(f"Showing first 100 of {len(extracted_text)} lines. Use download to get full content.")
+                        st.info(f"Showing first 100 of {len(extracted_text)} lines.")
                     
-                    # Download options
                     col1, col2 = st.columns(2)
                     with col1:
                         st.download_button(
@@ -315,7 +189,7 @@ elif task == "Task 2: Document Extraction":
                             data=df.to_csv(index=False).encode('utf-8'),
                             file_name="extracted_sections.csv",
                             mime='text/csv',
-                            key='csv_download'
+                            key='csv_download_extract'
                         )
                     with col2:
                         st.download_button(
@@ -323,7 +197,7 @@ elif task == "Task 2: Document Extraction":
                             data="\n".join(extracted_text).encode('utf-8'),
                             file_name="extracted_sections.txt",
                             mime='text/plain',
-                            key='txt_download'
+                            key='txt_download_extract'
                         )
                 else:
                     st.error("No content found. Try adjusting your section markers.")
