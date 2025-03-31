@@ -57,16 +57,84 @@ def fetch_document_from_url(url):
         # Check if it's an HTML document
         if "text/html" in response.headers['Content-Type']:
             soup = BeautifulSoup(response.text, 'html.parser')
-            # Attempt to find the document link (for example in a link with ".txt" or ".pdf" file)
+            
+            # Find the document link
             doc_link = None
             for link in soup.find_all("a", href=True):
-                if ".txt" in link['href'] or ".pdf" in link['href']:
+                if ".txt" in link['href'] or ".htm" in link['href'] or ".html" in link['href']:
                     doc_link = urljoin(full_url, link['href'])
                     break
-            return doc_link
+            
+            if doc_link:
+                # Fetch the actual document content
+                doc_response = requests.get(doc_link, headers=HEADERS)
+                doc_response.raise_for_status()
+                
+                # Parse the document content
+                doc_soup = BeautifulSoup(doc_response.text, 'html.parser')
+                
+                # Extract key information sections
+                info_sections = {
+                    "COMPANY INFORMATION": [],
+                    "FILING INFORMATION": [],
+                    "FINANCIAL DATA": [],
+                    "BUSINESS OVERVIEW": []
+                }
+                
+                # Find all tables in the document
+                tables = doc_soup.find_all('table')
+                
+                # Parse tables for key information
+                for table in tables:
+                    rows = table.find_all('tr')
+                    for row in rows:
+                        cells = row.find_all(['th', 'td'])
+                        if len(cells) == 2:  # Key-value pairs
+                            key = cells[0].get_text(strip=True).upper()
+                            value = cells[1].get_text(strip=True)
+                            
+                            # Categorize the information
+                            if 'COMPANY' in key or 'NAME' in key or 'ADDRESS' in key:
+                                info_sections["COMPANY INFORMATION"].append((key, value))
+                            elif 'FILING' in key or 'DATE' in key or 'PERIOD' in key:
+                                info_sections["FILING INFORMATION"].append((key, value))
+                            elif 'REVENUE' in key or 'INCOME' in key or 'ASSET' in key:
+                                info_sections["FINANCIAL DATA"].append((key, value))
+                            else:
+                                info_sections["BUSINESS OVERVIEW"].append((key, value))
+                
+                # Display the information in pretty tables
+                st.success("Document found! Here's the extracted information:")
+                
+                for section, items in info_sections.items():
+                    if items:  # Only show sections with content
+                        st.subheader(section)
+                        
+                        # Create a dataframe for better display
+                        df = pd.DataFrame(items, columns=["Field", "Value"])
+                        
+                        # Apply some styling
+                        st.dataframe(
+                            df.style
+                            .set_properties(**{'text-align': 'left'})
+                            .set_table_styles([{
+                                'selector': 'th',
+                                'props': [('background-color', '#f0f2f6'), 
+                                         ('font-weight', 'bold')]
+                            }]),
+                            height=min(len(items)*35 + 35, 500),  # Dynamic height
+                            use_container_width=True
+                        )
+                
+                st.markdown(f"[Download Full Document]({doc_link})")
+                return doc_link
+            else:
+                st.warning("No document link found on the page.")
+                return None
         else:
-            st.warning("No document found, the page may not contain any document.")
+            st.warning("The URL doesn't point to an HTML document.")
             return None
+            
     except requests.exceptions.RequestException as e:
         st.error(f"Error fetching document: {e}")
         return None
