@@ -243,7 +243,7 @@ elif task == "Task 2: Document Extraction":
                 st.write("\n".join(content))
                 
                 st.write("### Processing with AI...")
-                ai_results = process_with_deepseek(content)
+                ai_results = process_with_arliai(content)
                 if ai_results:
                     st.write("### AI Analysis Result")
                     st.markdown(ai_results)
