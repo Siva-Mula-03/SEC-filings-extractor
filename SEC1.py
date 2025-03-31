@@ -66,7 +66,6 @@ def create_zip(filings):
     return zip_buffer
 
 # Function to extract SEC document sections without NLP
-# Function to extract SEC document sections without NLP
 def extract_section(filing_url, section_name, end_marker):
     filing_url = validate_url(filing_url)
     if not filing_url:
@@ -84,8 +83,10 @@ def extract_section(filing_url, section_name, end_marker):
     extracted_section = []
     capturing = False
 
+    # Extract relevant sections of the document
     for element in soup.find_all(["p", "div", "table"]):
         text = element.get_text().strip()
+        
         # Start capturing when section_name is found
         if section_name and section_name.lower() in text.lower():
             capturing = True
@@ -97,7 +98,6 @@ def extract_section(filing_url, section_name, end_marker):
             break
 
     return extracted_section if extracted_section else None
-
 
 # Streamlit UI
 st.title("📊 SEC Filing & Document Extractor")
@@ -133,15 +133,21 @@ elif task == "Task 2: Document Extraction":
     end_marker = st.text_input("End Section (Leave blank for full extraction)")
 
     if st.button("Extract Section"):
-        # Extract document section without NLP processing (manual section extraction)
         if filing_url:
+            # Extract document section without NLP processing (manual section extraction)
             extracted_text = extract_section(filing_url, section_name, end_marker)
 
             if extracted_text:
-                df = pd.DataFrame({"Extracted Text": extracted_text})
+                # Convert extracted text into a DataFrame with one row per piece of extracted text
+                df = pd.DataFrame(extracted_text, columns=["Extracted Text"])
+                
                 st.write("### Extracted Information")
-                st.dataframe(df)
+                st.dataframe(df)  # Display as a clean table
+
+                # Create a CSV from the extracted DataFrame
                 csv = df.to_csv(index=False).encode('utf-8')
+
+                # Provide the download button for the CSV file
                 st.download_button("📥 Download CSV", data=csv, file_name="extracted_data.csv")
             else:
                 st.error("No relevant data found. Please provide a valid section name and end marker.")
