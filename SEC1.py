@@ -65,6 +65,35 @@ def create_zip(filings):
     zip_buffer.seek(0)
     return zip_buffer
 
+# Function to extract SEC document sections without NLP
+def extract_section(filing_url, section_name, end_marker):
+    filing_url = validate_url(filing_url)
+    if not filing_url:
+        st.error("Invalid SEC filing URL.")
+        return None
+
+    try:
+        response = requests.get(filing_url, headers=HEADERS)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Request failed: {e}")
+        return None
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    extracted_section = []
+    capturing = False
+
+    for element in soup.find_all(["p", "div", "table"]):
+        text = element.get_text().strip()
+        if section_name and section_name in text:
+            capturing = True
+        if capturing:
+            extracted_section.append(element.prettify())
+        if end_marker and end_marker in text:
+            break
+
+    return extracted_section if extracted_section else None
+
 # Streamlit UI
 st.title("📊 SEC Filing & Document Extractor")
 task = st.sidebar.radio("Select Task", ["Task 1: 10-Q Filings", "Task 2: Document Extraction"])
@@ -111,32 +140,3 @@ elif task == "Task 2: Document Extraction":
                 st.download_button("📥 Download CSV", data=csv, file_name="extracted_data.csv")
             else:
                 st.error("No relevant data found. Please provide a valid section name and end marker.")
-
-# Function to extract SEC document sections without NLP
-def extract_section(filing_url, section_name, end_marker):
-    filing_url = validate_url(filing_url)
-    if not filing_url:
-        st.error("Invalid SEC filing URL.")
-        return None
-
-    try:
-        response = requests.get(filing_url, headers=HEADERS)
-        response.raise_for_status()
-    except requests.exceptions.RequestException as e:
-        st.error(f"Request failed: {e}")
-        return None
-
-    soup = BeautifulSoup(response.text, "html.parser")
-    extracted_section = []
-    capturing = False
-
-    for element in soup.find_all(["p", "div", "table"]):
-        text = element.get_text().strip()
-        if section_name and section_name in text:
-            capturing = True
-        if capturing:
-            extracted_section.append(element.prettify())
-        if end_marker and end_marker in text:
-            break
-
-    return extracted_section if extracted_section else None
