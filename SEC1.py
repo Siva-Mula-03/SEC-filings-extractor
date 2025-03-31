@@ -4,22 +4,21 @@ import pandas as pd
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 import openai
+import re
 
 # SEC Base URL
 BASE_URL = "https://www.sec.gov"
 
 # Headers to avoid 403 Forbidden errors
 HEADERS = {
-    'User-Agent': 'Siva Nehesh - For Research - siva.nehesh@example.com',
+    'User-Agent': 'Company Name - Your Name - your.email@example.com',
     'Accept-Encoding': 'gzip, deflate',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     'Connection': 'keep-alive'
 }
 
-# Function to fetch and filter 10-Q filings
 def fetch_10q_filings(year, quarter):
     sec_url = f"{BASE_URL}/Archives/edgar/full-index/{year}/QTR{quarter}/crawler.idx"
-    
     try:
         response = requests.get(sec_url, headers=HEADERS)
         response.raise_for_status()
@@ -39,58 +38,71 @@ def fetch_10q_filings(year, quarter):
         st.error(f"Error fetching filings: {e}")
         return []
 
-# Document extraction functions
-def extract_section(url, start_section=None, end_section=None):
+def get_document_url(filing_url):
     try:
-        full_url = urljoin(BASE_URL, url)
-        response = requests.get(full_url, headers=HEADERS)
+        response = requests.get(filing_url, headers=HEADERS)
         response.raise_for_status()
-
         soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # Find the complete submission text file
         doc_link = None
-        for link in soup.find_all("a", href=True):
-            if ".htm" in link['href'] or ".html" in link['href']:
-                doc_link = urljoin(full_url, link['href'])
+        for link in soup.find_all('a', href=True):
+            if link['href'].endswith('.htm') or link['href'].endswith('.html'):
+                doc_link = urljoin(filing_url, link['href'])
                 break
         
         if not doc_link:
-            return None
+            # Alternative approach for some SEC filings
+            for link in soup.find_all('a', href=True):
+                if 'ix?doc=' in link['href']:
+                    doc_link = urljoin(filing_url, link['href'])
+                    break
+        
+        return doc_link
+    except Exception as e:
+        st.error(f"Error finding document URL: {str(e)}")
+        return None
 
-        doc_response = requests.get(doc_link, headers=HEADERS)
-        doc_response.raise_for_status()
-        doc_soup = BeautifulSoup(doc_response.text, 'html.parser')
-        all_text = doc_soup.get_text('\n', strip=True).split('\n')
+def extract_section_text(doc_url, start_section=None, end_section=None):
+    try:
+        response = requests.get(doc_url, headers=HEADERS)
+        response.raise_for_status()
+        
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # Remove unwanted elements
+        for element in soup(['script', 'style', 'meta', 'link', 'nav']):
+            element.decompose()
+        
+        text = soup.get_text('\n', strip=True)
+        lines = [line.strip() for line in text.split('\n') if line.strip()]
         
         if not start_section and not end_section:
-            return [line for line in all_text if line.strip()]
+            return lines
         
         start_idx = 0
-        end_idx = len(all_text)
+        end_idx = len(lines)
         
         if start_section:
-            for i, line in enumerate(all_text):
-                if start_section.lower() in line.lower():
+            for i, line in enumerate(lines):
+                if re.search(rf'\b{re.escape(start_section)}\b', line, re.IGNORECASE):
                     start_idx = i
                     break
         
         if end_section:
-            for i, line in enumerate(all_text[start_idx:], start=start_idx):
-                if end_section.lower() in line.lower():
+            for i, line in enumerate(lines[start_idx:], start=start_idx):
+                if re.search(rf'\b{re.escape(end_section)}\b', line, re.IGNORECASE):
                     end_idx = i
                     break
         
-        return [line for line in all_text[start_idx:end_idx] if line.strip()]
-
+        return lines[start_idx:end_idx]
     except Exception as e:
         st.error(f"Extraction error: {str(e)}")
         return None
 
-# AI-powered text processing
 def process_with_ai(text, api_key):
     try:
         openai.api_key = api_key
-        
-        # Truncate text to fit within token limits
         truncated_text = ' '.join(text[:3000]) if len(text) > 3000 else ' '.join(text)
         
         response = openai.ChatCompletion.create(
@@ -99,11 +111,10 @@ def process_with_ai(text, api_key):
                 {"role": "system", "content": """You are a financial analyst expert in SEC filings. 
                 Extract key headers and their corresponding values from the text. 
                 Return only a markdown table with columns 'Header' and 'Value'.
-                Preserve all numerical values exactly as they appear in the original text.
-                Include important financial metrics and business descriptions."""},
+                Preserve all numerical values exactly as they appear."""},
                 {"role": "user", "content": f"Text: {truncated_text}"}
             ],
-            temperature=0.3  # Lower temperature for more factual responses
+            temperature=0.3
         )
         
         table = response.choices[0].message['content']
@@ -118,7 +129,6 @@ def process_with_ai(text, api_key):
 st.set_page_config(page_title="SEC Filing Analyzer", layout="wide")
 st.title("📊 SEC Filing & Document Extractor")
 
-# Sidebar configuration
 with st.sidebar:
     st.header("Configuration")
     task = st.radio("Select Task", ["Task 1: 10-Q Filings", "Task 2: Document Extraction"])
@@ -129,20 +139,19 @@ with st.sidebar:
         use_ai = st.checkbox("Enable AI-powered structuring", value=True)
         if use_ai:
             api_key = st.text_input("OpenAI API Key", type="password",
-                                  help="Get your key from https://platform.openai.com/account/api-keys")
+                                  help="Get your key from platform.openai.com/account/api-keys")
         else:
             api_key = None
 
 if task == "Task 1: 10-Q Filings":
     st.header("🔍 Fetch 10-Q Filings")
-    
     col1, col2 = st.columns([1, 2])
     with col1:
         year = st.number_input("Enter Year", min_value=1995, max_value=2025, value=2024)
     with col2:
         quarters = st.multiselect("Select Quarters", [1, 2, 3, 4], default=[1])
 
-    if st.button("Fetch Filings", key="fetch_button"):
+    if st.button("Fetch Filings"):
         with st.spinner("Fetching filings..."):
             all_filings = []
             for q in quarters:
@@ -208,7 +217,7 @@ elif task == "Task 2: Document Extraction":
         """)
     
     filing_url = st.text_input("Enter SEC Filing URL", 
-                             placeholder="https://www.sec.gov/Archives/edgar/data/...")
+                             placeholder="https://www.sec.gov/Archives/edgar/data/.../primary_doc.xml")
     
     col1, col2 = st.columns(2)
     with col1:
@@ -218,12 +227,28 @@ elif task == "Task 2: Document Extraction":
         end_marker = st.text_input("End Section (optional)", 
                                  placeholder="Item 1A. Risk Factors")
 
-    if st.button("Extract Document", key="extract_button"):
+    if st.button("Extract Document"):
         if filing_url:
-            with st.spinner("Extracting document content..."):
-                extracted_text = extract_section(filing_url, section_name, end_marker)
+            if not filing_url.startswith('https://www.sec.gov'):
+                st.error("Please enter a valid SEC.gov URL")
+                st.stop()
+                
+            with st.spinner("Locating document..."):
+                doc_url = get_document_url(filing_url)
+                
+                if not doc_url:
+                    st.error("Could not find document in this filing. Try a different URL.")
+                    st.stop()
+                    
+                st.info(f"Found document at: {doc_url}")
+                
+                with st.spinner("Extracting content..."):
+                    extracted_text = extract_section_text(doc_url, section_name, end_marker)
 
-                if extracted_text:
+                    if not extracted_text:
+                        st.error("No content extracted. Try different section markers.")
+                        st.stop()
+                        
                     st.success(f"Extracted {len(extracted_text)} lines of text!")
                     
                     if use_ai and api_key:
@@ -234,7 +259,6 @@ elif task == "Task 2: Document Extraction":
                                 st.subheader("AI-Structured Data")
                                 st.markdown(ai_table, unsafe_allow_html=True)
                                 
-                                # Convert markdown table to DataFrame
                                 try:
                                     df = pd.read_csv(pd.compat.StringIO(ai_table), 
                                                    sep="|", skipinitialspace=True)
@@ -250,30 +274,27 @@ elif task == "Task 2: Document Extraction":
                                     st.error(f"Error processing AI output: {str(e)}")
                             else:
                                 st.warning("AI processing failed. Showing raw text.")
-                                st.code('\n'.join(extracted_text[:200]))
                     else:
                         st.subheader("Extracted Text Content")
-                        df = pd.DataFrame({
-                            'Line': range(1, len(extracted_text)+1),
-                            'Content': extracted_text
-                        })
-                        st.dataframe(df.head(100), height=400)
                         
-                        if len(extracted_text) > 100:
-                            st.info(f"Showing first 100 of {len(extracted_text)} lines.")
-                        
-                        st.download_button(
-                            label="📄 Download Full Text",
-                            data="\n".join(extracted_text).encode('utf-8'),
-                            file_name="extracted_text.txt",
-                            mime='text/plain'
-                        )
-                else:
-                    st.error("No content found. Try adjusting your section markers.")
+                    df = pd.DataFrame({
+                        'Line': range(1, len(extracted_text)+1),
+                        'Content': extracted_text
+                    })
+                    st.dataframe(df.head(100), height=400)
+                    
+                    if len(extracted_text) > 100:
+                        st.info(f"Showing first 100 of {len(extracted_text)} lines.")
+                    
+                    st.download_button(
+                        label="📄 Download Full Text",
+                        data="\n".join(extracted_text).encode('utf-8'),
+                        file_name="extracted_text.txt",
+                        mime='text/plain'
+                    )
         else:
             st.warning("Please enter a valid SEC filing URL")
 
-# Footer
 st.markdown("---")
 st.markdown("""
 <style>
