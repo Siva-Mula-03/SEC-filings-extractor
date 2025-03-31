@@ -262,4 +262,3 @@ elif task == "Task 2: Document Extraction":
                 if ai_results:
                     st.write("### AI Analysis Result")
                     st.markdown(ai_results)
-
