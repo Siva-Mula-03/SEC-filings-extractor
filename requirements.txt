@@ -4,3 +4,4 @@ pandas
 streamlit
 nltk
 openai
+selenium
