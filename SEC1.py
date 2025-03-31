@@ -236,7 +236,7 @@ elif task == "Task 2: Document Extraction":
         3. Extract the document and let the AI analyze its contents.
         """)
 
-    doc_url = st.text_input("Enter SEC Filing URL", value="https://www.sec.gov/Archives/edgar/data/320193/000032019323000010/apple-10q_2023q1.htm")
+    doc_url = st.text_input("Enter SEC Filing URL", value="")
     start_section = st.text_input("Enter start section (optional)")
     end_section = st.text_input("Enter end section (optional)")
 
