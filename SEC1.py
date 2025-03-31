@@ -133,9 +133,9 @@ def process_with_groq(text):
     }
 
     data = {
-        "model": "llama3-70b-8192",  # Model name as per the documentation
+        "model": "llama-3.3-70b-versatile",  # Model name as per the documentation
         "messages": [
-            {"role": "user", "content": text}
+            {"role": "user", "content": str(text)}  # Ensure content is a string
         ],
         "temperature": 0.7  # Optional parameter
     }
