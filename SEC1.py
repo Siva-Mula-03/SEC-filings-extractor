@@ -3,7 +3,6 @@ import requests
 import pandas as pd
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
-import openai
 import re
 
 # SEC Base URL
@@ -16,6 +15,9 @@ HEADERS = {
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     'Connection': 'keep-alive'
 }
+
+# DeepSeek API Key
+API_KEY = "sk-5595cf645da3408998569cf98ed48ca5"
 
 def fetch_10q_filings(year, quarter):
     sec_url = f"{BASE_URL}/Archives/edgar/full-index/{year}/QTR{quarter}/crawler.idx"
@@ -122,26 +124,25 @@ def extract_section_text(doc_url, start_section=None, end_section=None):
         st.error(f"Extraction error: {str(e)}")
         return None
 
-def process_with_ai(text, api_key):
+def process_with_deepseek(text):
     try:
-        openai.api_key = api_key
-        truncated_text = ' '.join(text[:3000]) if len(text) > 3000 else ' '.join(text)
+        url = "https://api.deepseek.com/analyze"  # Example DeepSeek API endpoint
+        headers = {
+            "Authorization": f"Bearer {API_KEY}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "text": ' '.join(text[:3000]) if len(text) > 3000 else ' '.join(text)
+        }
+
+        # Sending POST request to DeepSeek API
+        response = requests.post(url, headers=headers, json=payload)
+        response.raise_for_status()
         
-        response = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": """You are a financial analyst expert in SEC filings. 
-                Extract key headers and their corresponding values from the text. 
-                Return only a markdown table with columns 'Header' and 'Value'.
-                Preserve all numerical values exactly as they appear."""},
-                {"role": "user", "content": f"Text: {truncated_text}"}
-            ],
-            temperature=0.3
-        )
-        
-        table = response.choices[0].message['content']
-        if '| Header' in table and '| Value' in table:
-            return table
+        # Assuming DeepSeek API returns the results as a markdown table
+        result = response.json()
+        if "table" in result:
+            return result["table"]
         return None
     except Exception as e:
         st.error(f"AI processing error: {str(e)}")
@@ -155,16 +156,6 @@ with st.sidebar:
     st.header("Configuration")
     task = st.radio("Select Task", ["Task 1: 10-Q Filings", "Task 2: Document Extraction"])
     
-    if task == "Task 2: Document Extraction":
-        st.markdown("---")
-        st.subheader("AI Processing Options")
-        use_ai = st.checkbox("Enable AI-powered structuring", value=True)
-        if use_ai:
-            api_key = st.text_input("OpenAI API Key", type="password",
-                                  help="Get your key from platform.openai.com/account/api-keys")
-        else:
-            api_key = None
-
 if task == "Task 1: 10-Q Filings":
     st.header("🔍 Fetch 10-Q Filings")
     col1, col2 = st.columns([1, 2])
@@ -232,102 +223,24 @@ elif task == "Task 2: Document Extraction":
     
     with st.expander("ℹ️ How to use", expanded=True):
         st.write("""
-        1. Paste a SEC filing URL (e.g., from 10-Q filings)
-        2. Optionally specify section markers (like "Item 1. Business")
-        3. Enable AI processing for structured data extraction
-        4. Click "Extract Document"
+        1. Paste the SEC Filing URL for the document you want to extract from.
+        2. Specify the sections of the document (optional).
+        3. Extract the document and let the AI analyze its contents.
         """)
-    
-    filing_url = st.text_input("Enter SEC Filing URL", 
-                             placeholder="https://www.sec.gov/Archives/edgar/data/.../primary_doc.xml")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        section_name = st.text_input("Start Section (optional)", 
-                                  placeholder="Item 1. Business")
-    with col2:
-        end_marker = st.text_input("End Section (optional)", 
-                                 placeholder="Item 1A. Risk Factors")
 
-    if st.button("Extract Document"):
-        if filing_url:
-            if not filing_url.startswith('https://www.sec.gov'):
-                st.error("Please enter a valid SEC.gov URL")
-                st.stop()
-                
-            with st.spinner("Locating document..."):
-                doc_url = get_document_url(filing_url)
-                
-                if not doc_url:
-                    st.error("Could not find document in this filing. Try a different URL.")
-                    st.stop()
-                    
-                st.info(f"Found document at: {doc_url}")
-                
-                with st.spinner("Extracting content..."):
-                    extracted_text = extract_section_text(doc_url, section_name, end_marker)
+    doc_url = st.text_input("Enter SEC Filing URL", value="https://www.sec.gov/Archives/edgar/data/320193/000032019323000010/apple-10q_2023q1.htm")
+    start_section = st.text_input("Enter start section (optional)")
+    end_section = st.text_input("Enter end section (optional)")
 
-                    if not extracted_text:
-                        st.error("No content extracted. Try different section markers.")
-                        st.stop()
-                        
-                    st.success(f"Extracted {len(extracted_text)} lines of text!")
-                    
-                    if use_ai and api_key:
-                        with st.spinner("🧠 Analyzing with AI..."):
-                            ai_table = process_with_ai(extracted_text, api_key)
-                            
-                            if ai_table:
-                                st.subheader("AI-Structured Data")
-                                st.markdown(ai_table, unsafe_allow_html=True)
-                                
-                                try:
-                                    df = pd.read_csv(pd.compat.StringIO(ai_table), 
-                                                   sep="|", skipinitialspace=True)
-                                    df = df.dropna(axis=1, how='all').iloc[1:]
-                                    
-                                    st.download_button(
-                                        label="📥 Download Structured Data",
-                                        data=df.to_csv(index=False),
-                                        file_name="structured_data.csv",
-                                        mime='text/csv'
-                                    )
-                                except Exception as e:
-                                    st.error(f"Error processing AI output: {str(e)}")
-                            else:
-                                st.warning("AI processing failed. Showing raw text.")
-                    else:
-                        st.subheader("Extracted Text Content")
-                        
-                    df = pd.DataFrame({
-                        'Line': range(1, len(extracted_text)+1),
-                        'Content': extracted_text
-                    })
-                    st.dataframe(df.head(100), height=400)
-                    
-                    if len(extracted_text) > 100:
-                        st.info(f"Showing first 100 of {len(extracted_text)} lines.")
-                    
-                    st.download_button(
-                        label="📄 Download Full Text",
-                        data="\n".join(extracted_text).encode('utf-8'),
-                        file_name="extracted_text.txt",
-                        mime='text/plain'
-                    )
-        else:
-            st.warning("Please enter a valid SEC filing URL")
-
-st.markdown("---")
-st.markdown("""
-<style>
-.footer {
-    font-size: 0.8rem;
-    color: #666;
-    text-align: center;
-    margin-top: 2rem;
-}
-</style>
-<div class="footer">
-    SEC Filing Analyzer | Powered by Streamlit & OpenAI
-</div>
-""", unsafe_allow_html=True)
+    if st.button("Extract Section"):
+        with st.spinner("Extracting document..."):
+            content = extract_section_text(doc_url, start_section, end_section)
+            if content:
+                st.write("### Extracted Content")
+                st.write("\n".join(content))
+                
+                st.write("### Processing with AI...")
+                ai_results = process_with_deepseek(content)
+                if ai_results:
+                    st.write("### AI Analysis Result")
+                    st.markdown(ai_results)
