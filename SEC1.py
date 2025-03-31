@@ -17,8 +17,8 @@ HEADERS = {
 }
 
 # Set up the ARLIAI API configuration
-API_KEY = "1f091ee5-1cd6-4230-a94a-930bd2366335"
-API_URL = "https://api.arliai.com/v1/chat/completions"
+API_KEY = "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"
+API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 def fetch_10q_filings(year, quarter):
     sec_url = f"{BASE_URL}/Archives/edgar/full-index/{year}/QTR{quarter}/crawler.idx"
@@ -125,17 +125,17 @@ def extract_section_text(doc_url, start_section=None, end_section=None):
         st.error(f"Extraction error: {str(e)}")
         return None
 
-# Function to send a message to the ARLIAI API and get a response
-def process_with_arliai(text):
+# Function to send a message to the groq API and get a response
+def process_with_groq(text):
     headers = {
         'Authorization': f'Bearer {API_KEY}',
         'Content-Type': 'application/json'
     }
     
     data = {
-        "model": "deepseek-chat",  # Assuming this is the model you want to use
+        "model": "groq-chat",  # Assuming this is the model you want to use
         "messages": [
-            {"role": "system", "content": "You are a helpful assistant"},
+            {"role": "system", "content": "You are a helpful assistant."},
             {"role": "user", "content": text}
         ]
     }
@@ -150,6 +150,7 @@ def process_with_arliai(text):
     except requests.exceptions.RequestException as e:
         print(f"Error during API request: {e}")
         return None
+
 
 # Streamlit UI
 st.set_page_config(page_title="SEC Filing Analyzer", layout="wide")
@@ -243,7 +244,7 @@ elif task == "Task 2: Document Extraction":
                 st.write("\n".join(content))
                 
                 st.write("### Processing with AI...")
-                ai_results = process_with_arliai(content)
+                ai_results = process_with_groq(content)
                 if ai_results:
                     st.write("### AI Analysis Result")
                     st.markdown(ai_results)
