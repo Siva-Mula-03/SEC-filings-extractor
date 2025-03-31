@@ -122,6 +122,50 @@ def extract_section_text(doc_url, start_section=None, end_section=None):
         st.error(f"Extraction error: {str(e)}")
         return None
 
+# Set up the groq API configuration
+API_KEY = "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"
+API_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+# Function to send a message to the groq API and get a response
+def process_with_groq(text):
+    headers = {
+        'Authorization': f'Bearer {API_KEY}',
+        'Content-Type': 'application/json'
+    }
+
+    data = {
+        "model": "llama-3.3-70b-versatile",  # Model name as per the documentation
+        "messages": [
+            {"role": "user", "content": str(text)}  # Ensure content is a string
+        ],
+        "temperature": 0.7  # Optional parameter
+    }
+
+    try:
+        # Send POST request with a timeout of 30 seconds
+        response = requests.post(API_URL, headers=headers, json=data, timeout=30)
+
+        # Log the response status code and response body for debugging
+        print("Response Status Code:", response.status_code)
+        print("Response Text:", response.text)
+
+        # Check if the request was successful (status code 200)
+        response.raise_for_status()  # Will raise an exception for 4xx or 5xx status codes
+
+        response_data = response.json()
+
+        # Check if 'choices' are in the response and return content
+        if 'choices' in response_data and len(response_data['choices']) > 0:
+            return response_data['choices'][0]['message']['content']
+        else:
+            print("Unexpected response structure:", json.dumps(response_data, indent=2))
+            return None
+
+    except requests.exceptions.RequestException as e:
+        print(f"Error during API request: {e}")
+        return None
+
+
 # Streamlit UI
 st.set_page_config(page_title="SEC Filing Analyzer", layout="wide")
 st.title("📊 SEC Extract")
