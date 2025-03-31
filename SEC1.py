@@ -184,7 +184,8 @@ with st.sidebar:
             "Select File", 
             "combined_tsk1_tsk2_with_ui.py", 
             "simple_task1.py", 
-            "simple_task2.py", 
+            "simple_task2.py",
+            "SEC.py"
             "documentation.pdf"
         ]
     )
