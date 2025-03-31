@@ -14,13 +14,19 @@ nltk.download('punkt')
 # SEC Base URL
 BASE_URL = "https://www.sec.gov"
 
+# Headers to avoid 403 Forbidden errors
+HEADERS = {
+    'User-Agent': 'Siva Nehesh - For Research - siva.nehesh@example.com',
+    'Accept-Encoding': 'gzip, deflate',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+    'Connection': 'keep-alive'
+}
+
 # Function to fetch and filter 10-Q filings
 def fetch_10q_filings(year, quarter):
-    # Construct SEC URL for index file
-    sec_url = f"https://www.sec.gov/Archives/edgar/full-index/{year}/QTR{quarter}/crawler.idx"
-    
+    sec_url = f"{BASE_URL}/Archives/edgar/full-index/{year}/QTR{quarter}/crawler.idx"
     try:
-        response = requests.get(sec_url)
+        response = requests.get(sec_url, headers=HEADERS)
         response.raise_for_status()
         filings = []
         
@@ -32,7 +38,7 @@ def fetch_10q_filings(year, quarter):
                         "Company": parts[1],
                         "CIK": parts[0],
                         "Date": parts[3],
-                        "URL": parts[4]
+                        "URL": urljoin(BASE_URL, parts[4])
                     })
         return filings
     except requests.exceptions.RequestException as e:
@@ -44,14 +50,14 @@ def create_zip(filings):
     zip_buffer = io.BytesIO()
     with zipfile.ZipFile(zip_buffer, 'w') as zip_file:
         for filing in filings:
-            data = requests.get(filing["URL"]).text
+            data = requests.get(filing["URL"], headers=HEADERS).text
             zip_file.writestr(f"{filing['Company']}_{filing['Date']}.txt", data)
     zip_buffer.seek(0)
     return zip_buffer
 
 # Function to extract SEC document sections
 def extract_section(filing_url, section_name, end_marker):
-    response = requests.get(filing_url)
+    response = requests.get(filing_url, headers=HEADERS)
     soup = BeautifulSoup(response.text, "html.parser")
     text_lines = soup.get_text("\n").split("\n")
     extracted_section, start_idx = [], None
@@ -68,7 +74,7 @@ def extract_section(filing_url, section_name, end_marker):
 
 # NLP-based extraction for financial highlights
 def smart_extract(filing_url):
-    response = requests.get(filing_url)
+    response = requests.get(filing_url, headers=HEADERS)
     text = BeautifulSoup(response.text, "html.parser").get_text()
     sentences = sent_tokenize(text)
     keywords = ["Revenue", "Net Income", "EPS", "Risk Factors", "Management Discussion"]
