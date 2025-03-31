@@ -188,19 +188,30 @@ if task == "Task 1: 10-Q Filings":
                     file_name=f"10Q_filings_{year}_Q{'-'.join(map(str, quarters))}.txt",
                     mime='text/plain'
                 )
-    elif task == "Task 2: URL Text Extraction":
-    st.header("🔍 URL Text Extraction")
-    url = st.text_input("Enter URL to Extract Text", "https://www.sec.gov/")
+   elif task == "Task 2: Document Extraction":
+    st.header("📑 Extract SEC Document Section")
+    
+    with st.expander("ℹ️ How to use", expanded=True):
+        st.write("""
+        1. Paste the SEC Filing URL for the document you want to extract from.
+        2. Specify the sections of the document (optional).
+        3. Extract the document and let the AI analyze its contents.
+        """)
 
-    if st.button("Extract Text"):
-        with st.spinner("Extracting text..."):
-            doc_url = get_document_url(url)
-            if doc_url:
-                section_text = extract_section_text(doc_url)
-                if section_text:
-                    st.write("### Extracted Text")
-                    st.text_area("Text Content", "\n".join(section_text), height=300)
-                else:
-                    st.warning("No text found in the document.")
-            else:
-                st.warning("Document URL not found.")
+    doc_url = st.text_input("Enter SEC Filing URL", value="")
+    start_section = st.text_input("Enter start section (optional)")
+    end_section = st.text_input("Enter end section (optional)")
+
+    if st.button("Extract Section"):
+        with st.spinner("Extracting document..."):
+            content = extract_section_text(doc_url, start_section, end_section)
+            if content:
+                st.write("### Extracted Content")
+                st.write("\n".join(content))
+                
+                st.write("### Processing with AI...")
+                ai_results = process_with_groq(content)
+                print(ai_results)
+                if ai_results:
+                    st.write("### AI Analysis Result")
+                    st.markdown(ai_results)
