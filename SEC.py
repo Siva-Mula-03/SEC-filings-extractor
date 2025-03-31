@@ -4,10 +4,7 @@ import pandas as pd
 import zipfile
 import io
 from bs4 import BeautifulSoup
-from urllib.parse import urlparse
-import nltk
-nltk.download('punkt')
-
+from urllib.parse import urljoin, urlparse
 
 # SEC Base URL
 BASE_URL = "https://www.sec.gov"
@@ -20,12 +17,11 @@ HEADERS = {
     'Connection': 'keep-alive'
 }
 
-# Validate SEC URLs (No domain appending)
+# Validate and fix SEC URLs
 def validate_url(url):
-    # Remove any unwanted slashes at the start, no need to append BASE_URL
-    url = url.lstrip("/")
+    if not url.startswith("http"):
+        url = "https://" + url.lstrip("/")
     parsed = urlparse(url)
-    # Check if the URL has a valid scheme and netloc (this checks if it's a full URL)
     if not parsed.scheme or not parsed.netloc:
         return None  # Invalid URL
     return url
@@ -47,7 +43,7 @@ def fetch_10q_filings(year, quarter):
                             "Company": "Unknown",
                             "CIK": "Unknown",
                             "Date": "Unknown",
-                            "URL": part  # No domain is added
+                            "URL": urljoin(BASE_URL, part)
                         })
                         break
         return filings
@@ -68,35 +64,6 @@ def create_zip(filings):
                 zip_file.writestr(f"{filing['Company']}_{filing['Date']}.txt", response.text)
     zip_buffer.seek(0)
     return zip_buffer
-
-# Function to extract SEC document sections
-def extract_section(filing_url, section_name, end_marker):
-    filing_url = validate_url(filing_url)
-    if not filing_url:
-        st.error("Invalid SEC filing URL.")
-        return None
-
-    try:
-        response = requests.get(filing_url, headers=HEADERS)
-        response.raise_for_status()
-    except requests.exceptions.RequestException as e:
-        st.error(f"Request failed: {e}")
-        return None
-
-    soup = BeautifulSoup(response.text, "html.parser")
-    extracted_section = []
-    capturing = False
-
-    for element in soup.find_all(["p", "div", "table"]):
-        text = element.get_text().strip()
-        if section_name in text:
-            capturing = True
-        if capturing:
-            extracted_section.append(element.prettify())
-        if end_marker in text:
-            break
-
-    return extracted_section if extracted_section else None
 
 # Streamlit UI
 st.title("📊 SEC Filing & Document Extractor")
@@ -132,16 +99,44 @@ elif task == "Task 2: Document Extraction":
     end_marker = st.text_input("End Section (Leave blank for full extraction)")
 
     if st.button("Extract Section"):
-        if section_name and end_marker:
+        # Extract document section without NLP processing (manual section extraction)
+        if filing_url:
             extracted_text = extract_section(filing_url, section_name, end_marker)
-        else:
-            extracted_text = None  # No NLP-based extraction, so we need a valid section name.
 
-        if extracted_text:
-            df = pd.DataFrame({"Extracted Text": extracted_text})
-            st.write("### Extracted Information")
-            st.dataframe(df)
-            csv = df.to_csv(index=False).encode('utf-8')
-            st.download_button("📥 Download CSV", data=csv, file_name="extracted_data.csv")
-        else:
-            st.error("No relevant data found. Please provide a valid section name and end marker.")
+            if extracted_text:
+                df = pd.DataFrame({"Extracted Text": extracted_text})
+                st.write("### Extracted Information")
+                st.dataframe(df)
+                csv = df.to_csv(index=False).encode('utf-8')
+                st.download_button("📥 Download CSV", data=csv, file_name="extracted_data.csv")
+            else:
+                st.error("No relevant data found. Please provide a valid section name and end marker.")
+
+# Function to extract SEC document sections without NLP
+def extract_section(filing_url, section_name, end_marker):
+    filing_url = validate_url(filing_url)
+    if not filing_url:
+        st.error("Invalid SEC filing URL.")
+        return None
+
+    try:
+        response = requests.get(filing_url, headers=HEADERS)
+        response.raise_for_status()
+    except requests.exceptions.RequestException as e:
+        st.error(f"Request failed: {e}")
+        return None
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    extracted_section = []
+    capturing = False
+
+    for element in soup.find_all(["p", "div", "table"]):
+        text = element.get_text().strip()
+        if section_name and section_name in text:
+            capturing = True
+        if capturing:
+            extracted_section.append(element.prettify())
+        if end_marker and end_marker in text:
+            break
+
+    return extracted_section if extracted_section else None
