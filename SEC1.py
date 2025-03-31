@@ -145,9 +145,9 @@ def process_with_groq(text):
         # Send POST request with a timeout of 30 seconds
         response = requests.post(API_URL, headers=headers, json=data, timeout=30)
 
-        # Log the response status code and response body for debugging
-        print("Response Status Code:", response.status_code)
-        print("Response Text:", response.text)
+        # # Log the response status code and response body for debugging
+        # print("Response Status Code:", response.status_code)
+        # print("Response Text:", response.text)
 
         # Check if the request was successful (status code 200)
         response.raise_for_status()  # Will raise an exception for 4xx or 5xx status codes
