@@ -18,7 +18,7 @@ HEADERS = {
 
 # Set up the ARLIAI API configuration
 API_KEY = "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"
-API_URL = "https://api.groq.com/openai/v1"
+API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 def fetch_10q_filings(year, quarter):
     sec_url = f"{BASE_URL}/Archives/edgar/full-index/{year}/QTR{quarter}/crawler.idx"
@@ -132,19 +132,23 @@ def process_with_groq(text):
         'Content-Type': 'application/json'
     }
     
+    # Prepare the payload according to the Groq documentation
     data = {
-        "model": "groq-chat",  # Assuming this is the model you want to use
+        "model": "llama-3.3-70b-versatile",  # Use the appropriate model as per the docs
         "messages": [
-            {"role": "system", "content": "You are a helpful assistant."},
             {"role": "user", "content": text}
         ]
     }
 
     try:
+        # Send POST request to Groq API
         response = requests.post(API_URL, headers=headers, json=data)
         response.raise_for_status()  # Raise an exception for HTTP errors
-
+        
+        # Extract the AI response
         response_data = response.json()
+        
+        # Assuming the response has a field 'choices' with the result
         return response_data['choices'][0]['message']['content']
     
     except requests.exceptions.RequestException as e:
