@@ -27,10 +27,10 @@ def fetch_10q_filings(year, quarter):
                 parts = line.split()
                 if len(parts) >= 5:
                     filings.append({
+                        "Quarter": f"Q{quarter}",  # Added quarter column
                         "Form Type": parts[-4],
                         "CIK": parts[-3],
                         "Date": parts[-2],
-                        "Quarter": f"Q{quarter}",  # Added Quarter column
                         "URL": parts[-1]
                     })
         return filings
@@ -91,7 +91,7 @@ def extract_section_text(doc_url, start_section=None, end_section=None):
             soup = BeautifulSoup(response.text, 'html.parser')
             
             # Remove unwanted elements
-            for element in soup(['script', 'style', 'meta', 'link', 'nav', 'header', 'footer']):
+            for element in soup(['script', 'style', 'meta', 'link', 'nav', 'header', 'footer']):  # Fixed element filter
                 element.decompose()
             
             text = soup.get_text('\n', strip=True)
@@ -173,15 +173,14 @@ st.title("📊 SEC Extract")
 with st.sidebar:
     st.header("Configuration")
     task = st.radio("Select Task", ["Task 1: 10-Q Filings", "Task 2: URL Text Extraction"])
-
+    
 if task == "Task 1: 10-Q Filings":
     st.header("🔍 Fetch 10-Q Filings")
     col1, col2 = st.columns([1, 2])
     with col1:
-        quarters = st.multiselect("Select Quarters", [1, 2, 3, 4], default=[1])
-
-    with col2:
         year = st.number_input("Enter Year", min_value=1995, max_value=2025, value=2024)
+    with col2:
+        quarters = st.multiselect("Select Quarters", [1, 2, 3, 4], default=[1])
 
     if st.button("Fetch Filings"):
         with st.spinner("Fetching filings..."):
@@ -206,12 +205,9 @@ if task == "Task 1: 10-Q Filings":
         query = st.text_input("Search by CIK, Form Type, or Date")
         
         if query:
-            st.session_state.filtered_df = st.session_state.df[
-                st.session_state.df.apply(
-                    lambda row: query.lower() in str(row).lower(), 
-                    axis=1
-                )
-            ]
+            st.session_state.filtered_df = st.session_state.df[st.session_state.df.apply(
+                lambda row: query.lower() in str(row).lower(), axis=1
+            )]
             st.info(f"Filtered to {len(st.session_state.filtered_df)} filings")
         else:
             st.session_state.filtered_df = st.session_state.df.copy()
@@ -222,21 +218,36 @@ if task == "Task 1: 10-Q Filings":
             col1, col2 = st.columns(2)
             with col1:
                 csv = st.session_state.filtered_df.to_csv(index=False).encode('utf-8')
-                st.download_button("Download Filtered Results", csv, "filtered_results.csv", "text/csv", key="download-csv")
-
+                st.download_button(
+                    label="📥 Download as CSV",
+                    data=csv,
+                    file_name=f"10Q_filings_{year}_Q{'-'.join(map(str, quarters))}.csv",
+                    mime='text/csv'
+                )
             with col2:
-                st.write("Click a row below to extract documents or data")
-                selected_row = st.selectbox("Select Filing", st.session_state.filtered_df.index)
-                selected_filing = st.session_state.filtered_df.loc[selected_row]
+                txt = st.session_state.filtered_df.to_string(index=False)
+                st.download_button(
+                    label="📥 Download as TXT",
+                    data=txt,
+                    file_name=f"10Q_filings_{year}_Q{'-'.join(map(str, quarters))}.txt",
+                    mime='text/plain'
+                )
 
-                doc_url = get_document_url(selected_filing['URL'])
-                if doc_url:
-                    st.write(f"Document URL: {doc_url}")
-                    section_text = extract_section_text(doc_url)
-                    if section_text:
-                        st.write("\n".join(section_text))
-                    else:
-                        st.warning("No relevant section text found.")
-                else:
-                    st.warning("No document found for the selected filing.")
+elif task == "Task 2: URL Text Extraction":
+    st.header("Extract Text from SEC Filing URL")
+    url = st.text_input("Enter SEC Filing URL")
 
+    if url:
+        st.write(f"Processing file at: {url}")
+        doc_url = get_document_url(url)
+
+        if doc_url:
+            st.write(f"Document URL found: {doc_url}")
+            section_text = extract_section_text(doc_url, start_section="Risk Factors", end_section="Legal Proceedings")
+            if section_text:
+                for line in section_text:
+                    st.write(line)
+            else:
+                st.warning("No relevant sections found in the document.")
+        else:
+            st.warning("Document URL not found.")
