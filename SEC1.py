@@ -4,12 +4,6 @@ import pandas as pd
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 import re
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
-import time
-import os
 
 # SEC Base URL
 BASE_URL = "https://www.sec.gov"
@@ -85,97 +79,7 @@ def get_document_url(filing_url):
         st.error(f"Error finding document URL: {str(e)}")
         return None
 
-def setup_selenium_driver():
-    """Setup and return a Selenium WebDriver with appropriate options."""
-    chrome_options = Options()
-    chrome_options.add_argument("--headless=new")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("--disable-extensions")
-    chrome_options.add_argument("--remote-debugging-port=9222")
-    chrome_options.add_argument(f"user-agent={HEADERS['User-Agent']}")
-    
-    # Set binary location if in specific environment
-    if os.path.exists("/usr/bin/chromium-browser"):
-        chrome_options.binary_location = "/usr/bin/chromium-browser"
-    
-    try:
-        # Try with ChromeDriverManager first
-        driver = webdriver.Chrome(
-            service=Service(ChromeDriverManager().install()),
-            options=chrome_options
-        )
-        return driver
-    except Exception as e:
-        st.warning(f"ChromeDriverManager failed, trying direct path: {str(e)}")
-        try:
-            # Fallback to direct chromedriver path
-            driver = webdriver.Chrome(
-                service=Service('/usr/local/bin/chromedriver'),
-                options=chrome_options
-            )
-            return driver
-        except Exception as e:
-            st.error(f"Failed to setup Selenium: {str(e)}")
-            return None
-
-def extract_section_text_selenium(doc_url, start_section=None, end_section=None):
-    """Extract text from document using Selenium."""
-    driver = setup_selenium_driver()
-    if not driver:
-        return None
-    
-    try:
-        driver.get(doc_url)
-        time.sleep(3)  # Allow more time for page to load
-        
-        # Get page source and parse with BeautifulSoup
-        soup = BeautifulSoup(driver.page_source, 'html.parser')
-        
-        # Remove unwanted elements
-        for element in soup(['script', 'style', 'meta', 'link', 'nav', 'header', 'footer']):
-            element.decompose()
-        
-        text = soup.get_text('\n', strip=True)
-        lines = [line.strip() for line in text.split('\n') if line.strip()]
-        
-        if not start_section and not end_section:
-            return lines
-        
-        start_idx = 0
-        end_idx = len(lines)
-        
-        if start_section:
-            start_pattern = re.compile(rf'\b{re.escape(start_section)}\b', re.IGNORECASE)
-            for i, line in enumerate(lines):
-                if start_pattern.search(line):
-                    start_idx = i
-                    break
-        
-        if end_section:
-            end_pattern = re.compile(rf'\b{re.escape(end_section)}\b', re.IGNORECASE)
-            for i, line in enumerate(lines[start_idx:], start=start_idx):
-                if end_pattern.search(line):
-                    end_idx = i
-                    break
-        
-        return lines[start_idx:end_idx]
-    except Exception as e:
-        st.error(f"Selenium extraction error: {str(e)}")
-        return None
-    finally:
-        if driver:
-            driver.quit()
-
 def extract_section_text(doc_url, start_section=None, end_section=None):
-    """Try Selenium first, fall back to requests if needed."""
-    # First try with Selenium
-    content = extract_section_text_selenium(doc_url, start_section, end_section)
-    if content:
-        return content
-    
-    # Fall back to requests if Selenium fails
     try:
         response = requests.get(doc_url, headers=HEADERS)
         response.raise_for_status()
@@ -221,6 +125,7 @@ def extract_section_text(doc_url, start_section=None, end_section=None):
         st.error(f"Extraction error: {str(e)}")
         return None
 
+# Function to send a message to the groq API and get a response
 def process_with_groq(text):
     headers = {
         'Authorization': f'Bearer {API_KEY}',
@@ -228,7 +133,7 @@ def process_with_groq(text):
     }
     
     data = {
-        "model": "groq-chat",
+        "model": "groq-chat",  # Assuming this is the model you want to use
         "messages": [
             {"role": "system", "content": "You are a helpful assistant."},
             {"role": "user", "content": text}
@@ -237,13 +142,15 @@ def process_with_groq(text):
 
     try:
         response = requests.post(API_URL, headers=headers, json=data)
-        response.raise_for_status()
+        response.raise_for_status()  # Raise an exception for HTTP errors
+
         response_data = response.json()
         return response_data['choices'][0]['message']['content']
     
     except requests.exceptions.RequestException as e:
-        st.error(f"Error during API request: {e}")
+        print(f"Error during API request: {e}")
         return None
+
 
 # Streamlit UI
 st.set_page_config(page_title="SEC Filing Analyzer", layout="wide")
@@ -331,21 +238,14 @@ elif task == "Task 2: Document Extraction":
 
     if st.button("Extract Section"):
         with st.spinner("Extracting document..."):
-            # First try with Selenium
-            content = extract_section_text_selenium(doc_url, start_section, end_section)
-            
-            if not content:
-                st.warning("Selenium extraction failed, trying with requests...")
-                content = extract_section_text(doc_url, start_section, end_section)
-                
+            content = extract_section_text(doc_url, start_section, end_section)
             if content:
                 st.write("### Extracted Content")
                 st.write("\n".join(content))
                 
                 st.write("### Processing with AI...")
-                ai_results = process_with_groq("\n".join(content))
+                ai_results = process_with_groq(content)
                 if ai_results:
                     st.write("### AI Analysis Result")
                     st.markdown(ai_results)
-            else:
-                st.error("Failed to extract content from the document")
+
