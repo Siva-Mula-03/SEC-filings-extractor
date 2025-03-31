@@ -138,6 +138,58 @@ def fetch_document_from_url(url):
     except requests.exceptions.RequestException as e:
         st.error(f"Error fetching document: {e}")
         return None
+def extract_section(url, start_section=None, end_section=None):
+    try:
+        # Build the full URL
+        full_url = urljoin(BASE_URL, url)
+        response = requests.get(full_url, headers=HEADERS)
+        response.raise_for_status()
+
+        # Find the document link
+        soup = BeautifulSoup(response.text, 'html.parser')
+        doc_link = None
+        for link in soup.find_all("a", href=True):
+            if ".htm" in link['href'] or ".html" in link['href']:
+                doc_link = urljoin(full_url, link['href'])
+                break
+        
+        if not doc_link:
+            return None
+
+        # Fetch the actual document content
+        doc_response = requests.get(doc_link, headers=HEADERS)
+        doc_response.raise_for_status()
+        doc_soup = BeautifulSoup(doc_response.text, 'html.parser')
+        
+        # Extract all text content
+        all_text = doc_soup.get_text('\n', strip=True).split('\n')
+        
+        # If no sections specified, return all text
+        if not start_section and not end_section:
+            return [line for line in all_text if line.strip()]
+        
+        # Find start and end markers
+        start_idx = 0
+        end_idx = len(all_text)
+        
+        if start_section:
+            for i, line in enumerate(all_text):
+                if start_section.lower() in line.lower():
+                    start_idx = i
+                    break
+        
+        if end_section:
+            for i, line in enumerate(all_text[start_idx:], start=start_idx):
+                if end_section.lower() in line.lower():
+                    end_idx = i
+                    break
+        
+        return [line for line in all_text[start_idx:end_idx] if line.strip()]
+
+    except Exception as e:
+        st.error(f"Extraction error: {str(e)}")
+        return None
+
 
 # Streamlit UI
 st.title("📊 SEC Filing & Document Extractor")
@@ -221,15 +273,59 @@ if task == "Task 1: 10-Q Filings":
                     key='txt_download'
                 )
 
-elif task == "Task 2: Extract Document":
-    st.header("🔍 Extract Document from 10-Q URL")
-    url_input = st.text_input("Enter SEC 10-Q Filing URL", "https://www.sec.gov/Archives/edgar/data/320193/000032019323000065/")
+elif task == "Task 2: Document Extraction":
+    st.header("📑 Extract SEC Document Section")
+    filing_url = st.text_input("Enter SEC Filing URL", 
+                             placeholder="https://www.sec.gov/Archives/edgar/data/...")
     
-    if st.button("Fetch Document"):
-        with st.spinner("Fetching document..."):
-            doc_link = fetch_document_from_url(url_input)
-            if doc_link:
-                st.success("Document found! You can download it here:")
-                st.markdown(f"[Download Document]({doc_link})")
-            else:
-                st.error("No document found for the given filing URL.")
+    with st.expander("Section Options (leave both blank for full extraction)"):
+        col1, col2 = st.columns(2)
+        with col1:
+            section_name = st.text_input("Start Section (optional)", 
+                                      placeholder="Item 1. Business")
+        with col2:
+            end_marker = st.text_input("End Section (optional)", 
+                                     placeholder="Item 1A. Risk Factors")
+
+    if st.button("Extract Document"):
+        if filing_url:
+            with st.spinner("Extracting document content..."):
+                extracted_text = extract_section(filing_url, section_name, end_marker)
+
+                if extracted_text:
+                    st.success(f"Extracted {len(extracted_text)} lines of text!")
+                    
+                    # Create DataFrame with line numbers
+                    df = pd.DataFrame({
+                        'Line': range(1, len(extracted_text)+1),
+                        'Content': extracted_text
+                    })
+                    
+                    # Display first 100 lines with option to show more
+                    st.dataframe(df.head(100), height=400)
+                    
+                    if len(extracted_text) > 100:
+                        st.info(f"Showing first 100 of {len(extracted_text)} lines. Use download to get full content.")
+                    
+                    # Download options
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.download_button(
+                            label="📥 Download as CSV",
+                            data=df.to_csv(index=False).encode('utf-8'),
+                            file_name="extracted_sections.csv",
+                            mime='text/csv',
+                            key='csv_download'
+                        )
+                    with col2:
+                        st.download_button(
+                            label="📄 Download as TXT",
+                            data="\n".join(extracted_text).encode('utf-8'),
+                            file_name="extracted_sections.txt",
+                            mime='text/plain',
+                            key='txt_download'
+                        )
+                else:
+                    st.error("No content found. Try adjusting your section markers.")
+        else:
+            st.warning("Please enter a valid SEC filing URL")
