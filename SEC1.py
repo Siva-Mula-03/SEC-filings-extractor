@@ -30,6 +30,7 @@ def fetch_10q_filings(year, quarter):
                         "Form Type": parts[-4],
                         "CIK": parts[-3],
                         "Date": parts[-2],
+                        "Quarter": f"Q{quarter}",  # Added Quarter column
                         "URL": parts[-1]
                     })
         return filings
@@ -172,7 +173,7 @@ st.title("📊 SEC Extract")
 with st.sidebar:
     st.header("Configuration")
     task = st.radio("Select Task", ["Task 1: 10-Q Filings", "Task 2: URL Text Extraction"])
-    
+
 if task == "Task 1: 10-Q Filings":
     st.header("🔍 Fetch 10-Q Filings")
     col1, col2 = st.columns([1, 2])
@@ -227,39 +228,18 @@ if task == "Task 1: 10-Q Filings":
                     mime='text/csv'
                 )
             with col2:
-                txt = st.session_state.filtered_df.to_string(index=False).encode('utf-8')
-                st.download_button(
-                    label="📥 Download as TXT",
-                    data=txt,
-                    file_name=f"10Q_filings_{year}_Q{'-'.join(map(str, quarters))}.txt",
-                    mime='text/plain'
-                )
+                st.write("Click a row below to extract documents or data")
+                selected_row = st.selectbox("Select Filing", st.session_state.filtered_df.index)
+                selected_filing = st.session_state.filtered_df.loc[selected_row]
 
-elif task == "Task 2: Document Extraction":
-    st.header("📑 Extract SEC Document Section")
-    
-    with st.expander("ℹ️ How to use", expanded=True):
-        st.write("""
-        1. Paste the SEC Filing URL for the document you want to extract from.
-        2. Specify the sections of the document (optional).
-        3. Extract the document and let the AI analyze its contents.
-        """)
-
-    doc_url = st.text_input("Enter SEC Filing URL", value="")
-    start_section = st.text_input("Enter start section (optional)")
-    end_section = st.text_input("Enter end section (optional)")
-
-    if st.button("Extract Section"):
-        with st.spinner("Extracting document..."):
-            content = extract_section_text(doc_url, start_section, end_section)
-            if content:
-                st.write("### Extracted Content")
-                st.write("\n".join(content))
+                doc_url = get_document_url(selected_filing['URL'])
+                if doc_url:
+                    st.write(f"Document URL: {doc_url}")
+                    section_text = extract_section_text(doc_url)
+                    if section_text:
+                        st.write("\n".join(section_text))
+                    else:
+                        st.warning("No relevant section text found.")
+                else:
+                    st.warning("No document found for the selected filing.")
                 
-                st.write("### Processing with AI...")
-                ai_results = process_with_groq(content)
-                print(ai_results)
-                if ai_results:
-                    st.write("### AI Analysis Result")
-                    st.markdown(ai_results)
-
