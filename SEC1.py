@@ -132,24 +132,26 @@ def process_with_groq(text):
         'Content-Type': 'application/json'
     }
     
-    # Prepare the payload according to the Groq documentation
+    # Prepare the payload according to Groq documentation
     data = {
-        "model": "llama-3.3-70b-versatile",  
+        "model": "llama-3.3-70b-versatile",  # Correct model name
         "messages": [
             {"role": "user", "content": text}
         ],
-        "temperature": 0.7  # Optional parameter
+        "temperature": 0.7  # Optional parameter for creativity
     }
 
     try:
         # Send POST request to Groq API
         response = requests.post(API_URL, headers=headers, json=data)
-        response.raise_for_status()  # Raise an exception for HTTP errors
         
-        # Extract the AI response
+        # Check if the request was successful (status code 200)
+        response.raise_for_status()  # Raises HTTPError for bad responses
+        
+        # Extract the AI response (Groq's structure)
         response_data = response.json()
         
-        # Correct way to access Groq's response (different from OpenAI's structure)
+        # Assuming the response structure is as expected
         return response_data['choices'][0]['message']['content']
     
     except requests.exceptions.RequestException as e:
