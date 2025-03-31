@@ -4,7 +4,7 @@ import pandas as pd
 import zipfile
 import io
 from bs4 import BeautifulSoup
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urlparse
 
 # SEC Base URL
 BASE_URL = "https://www.sec.gov"
@@ -17,11 +17,12 @@ HEADERS = {
     'Connection': 'keep-alive'
 }
 
-# Validate and fix SEC URLs
+# Validate SEC URLs (No domain appending)
 def validate_url(url):
-    if not url.startswith("http"):
-        url = "https://" + url.lstrip("/")
+    # Remove any unwanted slashes at the start, no need to append BASE_URL
+    url = url.lstrip("/")
     parsed = urlparse(url)
+    # Check if the URL has a valid scheme and netloc (this checks if it's a full URL)
     if not parsed.scheme or not parsed.netloc:
         return None  # Invalid URL
     return url
@@ -43,7 +44,7 @@ def fetch_10q_filings(year, quarter):
                             "Company": "Unknown",
                             "CIK": "Unknown",
                             "Date": "Unknown",
-                            "URL": urljoin(BASE_URL, part)
+                            "URL": part  # No domain is added
                         })
                         break
         return filings
@@ -95,11 +96,11 @@ def extract_section(filing_url, section_name, end_marker):
     return extracted_section if extracted_section else None
 
 # Streamlit UI
-st.title("\ud83d\udcca SEC Filing & Document Extractor")
+st.title("📊 SEC Filing & Document Extractor")
 task = st.sidebar.radio("Select Task", ["Task 1: 10-Q Filings", "Task 2: Document Extraction"])
 
 if task == "Task 1: 10-Q Filings":
-    st.header("\ud83d\udd0d Fetch 10-Q Filings")
+    st.header("🔍 Fetch 10-Q Filings")
     year = st.number_input("Enter Year", min_value=1995, max_value=2025, value=2024)
     quarters = st.multiselect("Select Quarters", [1, 2, 3, 4], default=[1])
 
@@ -117,24 +118,27 @@ if task == "Task 1: 10-Q Filings":
 
             st.dataframe(df)
             zip_buffer = create_zip(all_filings)
-            st.download_button("\ud83d\udcbd Download ZIP", data=zip_buffer, file_name="10Q_filings.zip")
+            st.download_button("📥 Download ZIP", data=zip_buffer, file_name="10Q_filings.zip")
         else:
             st.error("No filings found.")
 
 elif task == "Task 2: Document Extraction":
-    st.header("\ud83d\udc91 Extract SEC Document Section")
+    st.header("📑 Extract SEC Document Section")
     filing_url = st.text_input("Enter SEC Filing URL")
     section_name = st.text_input("Start Section (Leave blank for full extraction)")
     end_marker = st.text_input("End Section (Leave blank for full extraction)")
 
     if st.button("Extract Section"):
-        extracted_text = extract_section(filing_url, section_name, end_marker)
+        if section_name and end_marker:
+            extracted_text = extract_section(filing_url, section_name, end_marker)
+        else:
+            extracted_text = None  # No NLP-based extraction, so we need a valid section name.
 
         if extracted_text:
             df = pd.DataFrame({"Extracted Text": extracted_text})
             st.write("### Extracted Information")
             st.dataframe(df)
             csv = df.to_csv(index=False).encode('utf-8')
-            st.download_button("\ud83d\udcbd Download CSV", data=csv, file_name="extracted_data.csv")
+            st.download_button("📥 Download CSV", data=csv, file_name="extracted_data.csv")
         else:
-            st.error("No relevant data found.")
+            st.error("No relevant data found. Please provide a valid section name and end marker.")
