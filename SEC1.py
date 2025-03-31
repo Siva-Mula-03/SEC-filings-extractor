@@ -86,14 +86,12 @@ def extract_section(filing_url, section_name, end_marker):
     # Extract relevant sections of the document
     for element in soup.find_all(["p", "div", "table"]):
         text = element.get_text().strip()
-        
-        # Start capturing when section_name is found
+
+        # Capture sections based on start and end markers
         if section_name and section_name.lower() in text.lower():
             capturing = True
-        # Capture the section
         if capturing:
             extracted_section.append(text)
-        # Stop capturing when end_marker is found
         if end_marker and end_marker.lower() in text.lower():
             break
 
@@ -140,7 +138,7 @@ elif task == "Task 2: Document Extraction":
             if extracted_text:
                 # Convert extracted text into a DataFrame with one row per piece of extracted text
                 df = pd.DataFrame(extracted_text, columns=["Extracted Text"])
-                
+
                 st.write("### Extracted Information")
                 st.dataframe(df)  # Display as a clean table
 
