@@ -18,7 +18,7 @@ HEADERS = {
 
 # Set up the ARLIAI API configuration
 API_KEY = "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"
-API_URL = "https://api.groq.com/openai/v1/chat/completions"
+API_URL = "https://api.groq.com/openai/v1"
 
 def fetch_10q_filings(year, quarter):
     sec_url = f"{BASE_URL}/Archives/edgar/full-index/{year}/QTR{quarter}/crawler.idx"
