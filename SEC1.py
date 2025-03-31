@@ -126,7 +126,7 @@ def extract_section_text(doc_url, start_section=None, end_section=None):
 
 def process_with_deepseek(text):
     try:
-        url = "https://api.deepseek.com/"  # DeepSeek API endpoint
+        url = "https://api.deepseek.com/v1"  # DeepSeek API endpoint
         headers = {
             "Authorization": f"Bearer {API_KEY}",
             "Content-Type": "application/json"
