@@ -252,9 +252,6 @@ elif task == "Task 2: URL Text Extraction":
     start_section = st.text_input("Enter start section (optional)")
     end_section = st.text_input("Enter end section (optional)")
 
-    # Debug: Output entered values
-    st.write(f"Entered URL: {doc_url}, Start Section: {start_section}, End Section: {end_section}")
-
     if st.button("Extract Section"):
         if doc_url:
             with st.spinner("Extracting document..."):
@@ -262,9 +259,6 @@ elif task == "Task 2: URL Text Extraction":
                 if not content:
                     st.warning("No content was extracted. Please check the URL and section names.")
                 else:
-                    st.write("### Extracted Content")
-                    st.write("\n".join(content))
-                
                     st.write("### Processing with AI...")
                     ai_results = process_with_groq(content)
                     if ai_results:
