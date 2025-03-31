@@ -17,10 +17,10 @@ BASE_URL = "https://www.sec.gov"
 
 # Headers to avoid 403 Forbidden errors
 HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept-Encoding': 'gzip, deflate',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    'Connection': 'keep-alive'
+    'User-Agent': 'Siva Nehesh - For Research - siva.nehesh@example.com',
+        'Accept-Encoding': 'gzip, deflate',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Connection': 'keep-alive'
 }
 
 # Function to fetch and filter 10-Q filings
