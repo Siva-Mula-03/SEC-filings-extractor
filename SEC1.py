@@ -165,33 +165,32 @@ def process_with_groq(text):
         return None
 
 
-# Streamlit UI
+import streamlit as st
+import os
+
+# Set page config
 st.set_page_config(page_title="SEC Filing Analyzer", layout="wide")
 st.title("📊 SEC Extract")
 
 # Sidebar: Task Selection
 with st.sidebar:
     st.header("Configuration")
-    
-    # Task Selection
-    task = st.radio("Select Task", ["Task 1: 10-Q Filings", "Task 2: URL Text Extraction"])
-    
-    # Code Files Dropdown
-    st.header("Code Files")
-    file_option = st.selectbox(
-        "Select Code/Documentation",
-        [
-            "Select File", 
-            "combined_tsk1_tsk2_with_ui.py", 
-            "simple_task1.py", 
-            "simple_task2.py",
-            "SEC.py",
-            "documentation.pdf"
-        ]
-    )
+    task = st.radio("Select Task", ["Task 1: 10-Q Filings", "Task 2: URL Text Extraction", "Code Files"])
 
-# Debug: Check which task is selected
+    # Add dropdown for code files selection
+    if task == "Code Files":
+        codefile = st.selectbox("Select Code File", [
+            "combined_tsk1_tsk2_with_ui.py",
+            "simple_task1.py",
+            "simple_task2.py",
+            "documentation.pdf"
+        ])
+
+# Debugging step: Check which task is selected
 st.write(f"Selected Task: {task}")
+
+# Check the current working directory
+st.write(f"Current working directory: {os.getcwd()}")
 
 if task == "Task 1: 10-Q Filings":
     st.header("🔍 Fetch 10-Q Filings")
@@ -256,13 +255,10 @@ elif task == "Task 2: URL Text Extraction":
     st.header("📑 Extract SEC Document Section")
     
     with st.expander("ℹ️ How to use", expanded=True):
-        st.write("""
-        1. Paste the SEC Filing URL for the document you want to extract from.
-        2. Specify the sections of the document (optional).
-        3. Extract the document and let the AI analyze its contents.
-        """)
+        st.write("""1. Paste the SEC Filing URL for the document you want to extract from.
+                   2. Specify the sections of the document (optional).
+                   3. Extract the document and let the AI analyze its contents.""")
 
-    # Debugging step: Ensure input fields are displayed
     doc_url = st.text_input("Enter SEC Filing URL", value="")
     start_section = st.text_input("Enter start section (optional)")
     end_section = st.text_input("Enter end section (optional)")
@@ -274,7 +270,6 @@ elif task == "Task 2: URL Text Extraction":
                 if not content:
                     st.warning("No content was extracted. Please check the URL and section names.")
                 else:
-
                     st.write("### Extracted Content")
                     st.write("\n".join(content))
                     st.write("### Processing with AI...")
@@ -287,19 +282,15 @@ elif task == "Task 2: URL Text Extraction":
         else:
             st.warning("Please enter a valid SEC filing URL.")
 
-# Display Code or Documentation based on user selection
-if file_option != "Select File":
-    file_path = f"data/{file_option}"
-    
-    try:
-        with open(file_path, "r") as file:
-            if file_option.endswith(".py"):
-                # Display Python code with pretty formatting
+elif task == "Code Files":
+    st.header("📄 Code Files and Documentation")
+
+    # Checking if the codefile dropdown is selected
+    if codefile:
+        try:
+            file_path = os.path.join(os.getcwd(), codefile)
+            with open(file_path, "r") as file:
                 code = file.read()
                 st.code(code, language='python')
-            elif file_option.endswith(".pdf"):
-                # Display PDF (since it's documentation)
-                st.write("### Documentation")
-                st.markdown(f'<embed src="{file_path}" width="100%" height="600px" type="application/pdf">', unsafe_allow_html=True)
-    except Exception as e:
-        st.error(f"Error loading file: {e}")
+        except Exception as e:
+            st.error(f"Error reading file: {str(e)}")
