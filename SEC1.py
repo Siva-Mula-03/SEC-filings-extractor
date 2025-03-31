@@ -16,8 +16,9 @@ HEADERS = {
     'Connection': 'keep-alive'
 }
 
-# DeepSeek API Key
-API_KEY = "sk-5595cf645da3408998569cf98ed48ca5"
+# Set up the ARLIAI API configuration
+API_KEY = "1f091ee5-1cd6-4230-a94a-930bd2366335"
+API_URL = "https://api.arliai.com/v1/chat/completions"
 
 def fetch_10q_filings(year, quarter):
     sec_url = f"{BASE_URL}/Archives/edgar/full-index/{year}/QTR{quarter}/crawler.idx"
@@ -124,41 +125,30 @@ def extract_section_text(doc_url, start_section=None, end_section=None):
         st.error(f"Extraction error: {str(e)}")
         return None
 
-def process_with_deepseek(text):
-    try:
-        url = "https://api.deepseek.com/v1/chat/completions"  # Correct endpoint
-        headers = {
-            "Authorization": f"Bearer {API_KEY}",
-            "Content-Type": "application/json"
-        }
-        
-        # Truncate text if too long (DeepSeek may have token limits)
-        processed_text = ' '.join(text[:3000]) if len(text) > 3000 else ' '.join(text)
-        
-        payload = {
-            "model": "deepseek-chat",  # Specify the model
-            "messages": [
-                {"role": "user", "content": processed_text}
-            ],
-            "temperature": 0.7,  # Adjust creativity (0-1)
-        }
+# Function to send a message to the ARLIAI API and get a response
+def process_with_arliai(text):
+    headers = {
+        'Authorization': f'Bearer {API_KEY}',
+        'Content-Type': 'application/json'
+    }
+    
+    data = {
+        "model": "deepseek-chat",  # Assuming this is the model you want to use
+        "messages": [
+            {"role": "system", "content": "You are a helpful assistant"},
+            {"role": "user", "content": text}
+        ]
+    }
 
-        response = requests.post(url, headers=headers, json=payload)
-        response.raise_for_status()  # Raise error for bad status codes
-        
-        result = response.json()
-        
-        # Extract the AI's reply (assuming it's in standard chat-completion format)
-        if "choices" in result and len(result["choices"]) > 0:
-            ai_response = result["choices"][0]["message"]["content"]
-            return ai_response  # Return the generated text
-        
-        return None
+    try:
+        response = requests.post(API_URL, headers=headers, json=data)
+        response.raise_for_status()  # Raise an exception for HTTP errors
+
+        response_data = response.json()
+        return response_data['choices'][0]['message']['content']
+    
     except requests.exceptions.RequestException as e:
-        st.error(f"API request failed: {str(e)}")
-        return None
-    except Exception as e:
-        st.error(f"Processing error: {str(e)}")
+        print(f"Error during API request: {e}")
         return None
 
 # Streamlit UI
