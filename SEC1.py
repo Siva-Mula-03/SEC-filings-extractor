@@ -3,7 +3,7 @@ import requests
 import pandas as pd
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
-import re
+import openai
 
 # SEC Base URL
 BASE_URL = "https://www.sec.gov"
@@ -63,7 +63,7 @@ def extract_section(url, start_section=None, end_section=None):
         
         if not start_section and not end_section:
             return [line for line in all_text if line.strip()]
-
+        
         start_idx = 0
         end_idx = len(all_text)
         
@@ -85,46 +85,64 @@ def extract_section(url, start_section=None, end_section=None):
         st.error(f"Extraction error: {str(e)}")
         return None
 
-# Function to identify and extract structured headers and values
-def parse_headers_and_values(extracted_text):
-    sections = []
-    current_section = None
-    content = []
-
-    # Regular expressions to detect headers (Item numbers, etc.)
-    header_regex = r"(Item \d+\.?[\d]*|Section \d+\.?[\d]*)"
-    
-    for line in extracted_text:
-        header_match = re.match(header_regex, line)
-        if header_match:
-            if current_section:
-                # Save the last section if it's not empty
-                sections.append({"Header": current_section, "Content": "\n".join(content)})
-            # Start a new section
-            current_section = line.strip()
-            content = []
-        else:
-            content.append(line.strip())
-
-    # Append the last section if it exists
-    if current_section and content:
-        sections.append({"Header": current_section, "Content": "\n".join(content)})
-    
-    return sections
+# AI-powered text processing
+def process_with_ai(text, api_key):
+    try:
+        openai.api_key = api_key
+        
+        # Truncate text to fit within token limits
+        truncated_text = ' '.join(text[:3000]) if len(text) > 3000 else ' '.join(text)
+        
+        response = openai.ChatCompletion.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": """You are a financial analyst expert in SEC filings. 
+                Extract key headers and their corresponding values from the text. 
+                Return only a markdown table with columns 'Header' and 'Value'.
+                Preserve all numerical values exactly as they appear in the original text.
+                Include important financial metrics and business descriptions."""},
+                {"role": "user", "content": f"Text: {truncated_text}"}
+            ],
+            temperature=0.3  # Lower temperature for more factual responses
+        )
+        
+        table = response.choices[0].message['content']
+        if '| Header' in table and '| Value' in table:
+            return table
+        return None
+    except Exception as e:
+        st.error(f"AI processing error: {str(e)}")
+        return None
 
 # Streamlit UI
+st.set_page_config(page_title="SEC Filing Analyzer", layout="wide")
 st.title("📊 SEC Filing & Document Extractor")
-task = st.sidebar.radio("Select Task", ["Task 1: 10-Q Filings", "Task 2: Document Extraction"])
+
+# Sidebar configuration
+with st.sidebar:
+    st.header("Configuration")
+    task = st.radio("Select Task", ["Task 1: 10-Q Filings", "Task 2: Document Extraction"])
+    
+    if task == "Task 2: Document Extraction":
+        st.markdown("---")
+        st.subheader("AI Processing Options")
+        use_ai = st.checkbox("Enable AI-powered structuring", value=True)
+        if use_ai:
+            api_key = st.text_input("OpenAI API Key", type="password",
+                                  help="Get your key from https://platform.openai.com/account/api-keys")
+        else:
+            api_key = None
 
 if task == "Task 1: 10-Q Filings":
     st.header("🔍 Fetch 10-Q Filings")
-    col1, col2 = st.columns(2)
+    
+    col1, col2 = st.columns([1, 2])
     with col1:
         year = st.number_input("Enter Year", min_value=1995, max_value=2025, value=2024)
     with col2:
         quarters = st.multiselect("Select Quarters", [1, 2, 3, 4], default=[1])
 
-    if st.button("Fetch Filings"):
+    if st.button("Fetch Filings", key="fetch_button"):
         with st.spinner("Fetching filings..."):
             all_filings = []
             for q in quarters:
@@ -139,6 +157,8 @@ if task == "Task 1: 10-Q Filings":
                 st.session_state.df = df
                 st.session_state.filtered_df = df.copy()
                 st.success(f"Found {len(df)} filings!")
+            else:
+                st.warning("No filings found for the selected criteria")
 
     if 'df' in st.session_state:
         st.write("### Filter Results")
@@ -155,7 +175,7 @@ if task == "Task 1: 10-Q Filings":
         else:
             st.session_state.filtered_df = st.session_state.df.copy()
 
-        st.dataframe(st.session_state.filtered_df)
+        st.dataframe(st.session_state.filtered_df, height=500)
 
         if not st.session_state.filtered_df.empty:
             col1, col2 = st.columns(2)
@@ -165,8 +185,7 @@ if task == "Task 1: 10-Q Filings":
                     label="📥 Download as CSV",
                     data=csv,
                     file_name=f"10Q_filings_{year}_Q{'-'.join(map(str, quarters))}.csv",
-                    mime='text/csv',
-                    key='csv_download'
+                    mime='text/csv'
                 )
             with col2:
                 txt = st.session_state.filtered_df.to_string(index=False).encode('utf-8')
@@ -174,60 +193,98 @@ if task == "Task 1: 10-Q Filings":
                     label="📥 Download as TXT",
                     data=txt,
                     file_name=f"10Q_filings_{year}_Q{'-'.join(map(str, quarters))}.txt",
-                    mime='text/plain',
-                    key='txt_download'
+                    mime='text/plain'
                 )
 
 elif task == "Task 2: Document Extraction":
     st.header("📑 Extract SEC Document Section")
+    
+    with st.expander("ℹ️ How to use", expanded=True):
+        st.write("""
+        1. Paste a SEC filing URL (e.g., from 10-Q filings)
+        2. Optionally specify section markers (like "Item 1. Business")
+        3. Enable AI processing for structured data extraction
+        4. Click "Extract Document"
+        """)
+    
     filing_url = st.text_input("Enter SEC Filing URL", 
                              placeholder="https://www.sec.gov/Archives/edgar/data/...")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        section_name = st.text_input("Start Section (optional)", 
+                                  placeholder="Item 1. Business")
+    with col2:
+        end_marker = st.text_input("End Section (optional)", 
+                                 placeholder="Item 1A. Risk Factors")
 
-    with st.expander("Section Options (leave both blank for full extraction)"):
-
-        col1, col2 = st.columns(2)
-        with col1:
-            section_name = st.text_input("Start Section (optional)", 
-                                      placeholder="Item 1. Business")
-        with col2:
-            end_marker = st.text_input("End Section (optional)", 
-                                     placeholder="Item 1A. Risk Factors")
-
-    if st.button("Extract Document"):
+    if st.button("Extract Document", key="extract_button"):
         if filing_url:
             with st.spinner("Extracting document content..."):
                 extracted_text = extract_section(filing_url, section_name, end_marker)
 
                 if extracted_text:
                     st.success(f"Extracted {len(extracted_text)} lines of text!")
-
-                    # Parsing the extracted text into structured sections
-                    structured_sections = parse_headers_and_values(extracted_text)
-
-                    # Convert structured data into a DataFrame for better visualization
-                    if structured_sections:
-                        structured_df = pd.DataFrame(structured_sections)
-                        st.dataframe(structured_df)
-
-                        # Download options
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            st.download_button(
-                                label="📥 Download as CSV",
-                                data=structured_df.to_csv(index=False).encode('utf-8'),
-                                file_name="structured_sections.csv",
-                                mime='text/csv',
-                                key='csv_download_extract'
-                            )
-                        with col2:
-                            st.download_button(
-                                label="📄 Download as TXT",
-                                data="\n".join([f"{row['Header']}\n{row['Content']}" for index, row in structured_df.iterrows()]).encode('utf-8'),
-                                file_name="structured_sections.txt",
-                                mime='text/plain',
-                                key='txt_download_extract'
-                            )
+                    
+                    if use_ai and api_key:
+                        with st.spinner("🧠 Analyzing with AI..."):
+                            ai_table = process_with_ai(extracted_text, api_key)
+                            
+                            if ai_table:
+                                st.subheader("AI-Structured Data")
+                                st.markdown(ai_table, unsafe_allow_html=True)
+                                
+                                # Convert markdown table to DataFrame
+                                try:
+                                    df = pd.read_csv(pd.compat.StringIO(ai_table), 
+                                                   sep="|", skipinitialspace=True)
+                                    df = df.dropna(axis=1, how='all').iloc[1:]
+                                    
+                                    st.download_button(
+                                        label="📥 Download Structured Data",
+                                        data=df.to_csv(index=False),
+                                        file_name="structured_data.csv",
+                                        mime='text/csv'
+                                    )
+                                except Exception as e:
+                                    st.error(f"Error processing AI output: {str(e)}")
+                            else:
+                                st.warning("AI processing failed. Showing raw text.")
+                                st.code('\n'.join(extracted_text[:200]))
+                    else:
+                        st.subheader("Extracted Text Content")
+                        df = pd.DataFrame({
+                            'Line': range(1, len(extracted_text)+1),
+                            'Content': extracted_text
+                        })
+                        st.dataframe(df.head(100), height=400)
+                        
+                        if len(extracted_text) > 100:
+                            st.info(f"Showing first 100 of {len(extracted_text)} lines.")
+                        
+                        st.download_button(
+                            label="📄 Download Full Text",
+                            data="\n".join(extracted_text).encode('utf-8'),
+                            file_name="extracted_text.txt",
+                            mime='text/plain'
+                        )
                 else:
                     st.error("No content found. Try adjusting your section markers.")
         else:
             st.warning("Please enter a valid SEC filing URL")
+
+# Footer
+st.markdown("---")
+st.markdown("""
+<style>
+.footer {
+    font-size: 0.8rem;
+    color: #666;
+    text-align: center;
+    margin-top: 2rem;
+}
+</style>
+<div class="footer">
+    SEC Filing Analyzer | Powered by Streamlit & OpenAI
+</div>
+""", unsafe_allow_html=True)
