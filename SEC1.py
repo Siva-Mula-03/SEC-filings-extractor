@@ -31,12 +31,12 @@ def fetch_10q_filings(year, quarter):
                 parts = line.split()
                 # We know the last part is URL, second-last is Date, and third-last is CIK
                 if len(parts) >= 5:  # Ensure there are enough parts in the line
-                    company_name = " ".join(parts[:-3])  # Everything except the last 3 parts
+                    form_type = parts[-4]  # Form type (should be '10-Q' for our case)
                     cik = parts[-3]
                     date_filed = parts[-2]
                     url = parts[-1]  # Last part is the URL
                     filings.append({
-                        "Company": company_name,
+                        "Form Type": form_type,
                         "CIK": cik,
                         "Date": date_filed,
                         "URL": url  # Full URL as it is
@@ -97,14 +97,14 @@ if task == "Task 1: 10-Q Filings":
                 
                 # Filter results based on user input
                 st.write("### Filter Results")
-                query = st.text_input("Search by CIK, Company, or Date")
+                query = st.text_input("Search by CIK, Form Type, or Date")
                 if query:
                     df = df[df.apply(lambda row: query.lower() in str(row).lower(), axis=1)]
                     st.info(f"Filtered to {len(df)} filings")
 
                 st.dataframe(df)
 
-                # Download options
+                # Download options for CSV
                 col1, col2 = st.columns(2)
                 with col1:
                     if st.button("📥 Download as CSV"):
@@ -116,9 +116,14 @@ if task == "Task 1: 10-Q Filings":
                             mime='text/csv'
                         )
                 with col2:
-                    if st.button("📦 Download as ZIP"):
-                        # Option for ZIP download (optional implementation based on the original code)
-                        pass
+                    if st.button("📥 Download as TXT"):
+                        txt = df.to_string(index=False).encode('utf-8')
+                        st.download_button(
+                            label="Download TXT",
+                            data=txt,
+                            file_name=f"10Q_filings_{year}_Q{'-'.join(map(str, quarters))}.txt",
+                            mime='text/plain'
+                        )
             else:
                 st.error("No filings found for the selected criteria.")
 
