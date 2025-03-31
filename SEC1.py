@@ -1,170 +1,3 @@
-import streamlit as st
-import requests
-import pandas as pd
-from bs4 import BeautifulSoup
-from urllib.parse import urljoin
-import re
-
-# SEC Base URL
-BASE_URL = "https://www.sec.gov"
-
-# Headers to avoid 403 Forbidden errors
-HEADERS = {
-    'User-Agent': 'Siva Nehesh - For Research - siva.nehesh@example.com',
-    'Accept-Encoding': 'gzip, deflate',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-    'Connection': 'keep-alive'
-}
-
-def fetch_10q_filings(year, quarter):
-    sec_url = f"{BASE_URL}/Archives/edgar/full-index/{year}/QTR{quarter}/crawler.idx"
-    try:
-        response = requests.get(sec_url, headers=HEADERS)
-        response.raise_for_status()
-        filings = []
-        for line in response.text.split('\n'):
-            if '10-Q' in line and 'edgar/data/' in line:
-                parts = line.split()
-                if len(parts) >= 5:
-                    filings.append({
-                        "Quarter": f"Q{quarter}",  # Quarter column is added here
-                        "Form Type": parts[-4],
-                        "CIK": parts[-3],
-                        "Date": parts[-2],
-                        "URL": parts[-1]
-                    })
-        return filings
-    except requests.exceptions.RequestException as e:
-        st.error(f"Error fetching filings: {e}")
-        return []
-
-def get_document_url(filing_url):
-    try:
-        response = requests.get(filing_url, headers=HEADERS)
-        response.raise_for_status()
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # Find the table with filing documents
-        documents_table = soup.find('table', {'class': 'tableFile'})
-        if not documents_table:
-            st.error("Could not find documents table in the filing")
-            return None
-            
-        # Find the primary document (usually 10-Q)
-        primary_doc = None
-        for row in documents_table.find_all('tr')[1:]:  # Skip header row
-            cols = row.find_all('td')
-            if len(cols) >= 3:
-                doc_type = cols[3].text.strip()
-                if '10-Q' in doc_type or '10Q' in doc_type:
-                    doc_href = cols[2].find('a')['href']
-                    primary_doc = urljoin(filing_url, doc_href)
-                    break
-        
-        if not primary_doc:
-            # If no 10-Q found, get the first HTML document
-            for row in documents_table.find_all('tr')[1:]:
-                cols = row.find_all('td')
-                if len(cols) >= 3:
-                    doc_href = cols[2].find('a')['href']
-                    if doc_href.endswith('.htm') or doc_href.endswith('.html'):
-                        primary_doc = urljoin(filing_url, doc_href)
-                        break
-        
-        return primary_doc
-    except Exception as e:
-        st.error(f"Error finding document URL: {str(e)}")
-        return None
-
-def extract_section_text(doc_url, start_section=None, end_section=None):
-    try:
-        response = requests.get(doc_url, headers=HEADERS)
-        response.raise_for_status()
-        
-        # Handle both HTML and plain text documents
-        if doc_url.endswith('.txt'):
-            # For plain text filings
-            text = response.text
-            lines = [line.strip() for line in text.split('\n') if line.strip()]
-        else:
-            # For HTML filings
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
-            # Remove unwanted elements
-            for element in soup(['script', 'style', 'meta', 'link', 'nav', 'header', 'footer']):  # Fixed element filter
-                element.decompose()
-            
-            text = soup.get_text('\n', strip=True)
-            lines = [line.strip() for line in text.split('\n') if line.strip()]
-        
-        if not start_section and not end_section:
-            return lines
-        
-        start_idx = 0
-        end_idx = len(lines)
-        
-        if start_section:
-            start_pattern = re.compile(rf'\b{re.escape(start_section)}\b', re.IGNORECASE)
-            for i, line in enumerate(lines):
-                if start_pattern.search(line):
-                    start_idx = i
-                    break
-        
-        if end_section:
-            end_pattern = re.compile(rf'\b{re.escape(end_section)}\b', re.IGNORECASE)
-            for i, line in enumerate(lines[start_idx:], start=start_idx):
-                if end_pattern.search(line):
-                    end_idx = i
-                    break
-        
-        return lines[start_idx:end_idx]
-    except Exception as e:
-        st.error(f"Extraction error: {str(e)}")
-        return None
-
-# Set up the groq API configuration
-API_KEY = "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"
-API_URL = "https://api.groq.com/openai/v1/chat/completions"
-
-# Function to send a message to the groq API and get a response
-def process_with_groq(text):
-    headers = {
-        'Authorization': f'Bearer {API_KEY}',
-        'Content-Type': 'application/json'
-    }
-
-    data = {
-        "model": "llama-3.3-70b-versatile",  # Model name as per the documentation
-        "messages": [
-            {"role": "user", "content": str(text)}  # Ensure content is a string
-        ],
-        "temperature": 0.7  # Optional parameter
-    }
-
-    try:
-        # Send POST request with a timeout of 30 seconds
-        response = requests.post(API_URL, headers=headers, json=data, timeout=30)
-
-        # # Log the response status code and response body for debugging
-        # print("Response Status Code:", response.status_code)
-        # print("Response Text:", response.text)
-
-        # Check if the request was successful (status code 200)
-        response.raise_for_status()  # Will raise an exception for 4xx or 5xx status codes
-
-        response_data = response.json()
-
-        # Check if 'choices' are in the response and return content
-        if 'choices' in response_data and len(response_data['choices']) > 0:
-            return response_data['choices'][0]['message']['content']
-        else:
-            print("Unexpected response structure:", json.dumps(response_data, indent=2))
-            return None
-
-    except requests.exceptions.RequestException as e:
-        print(f"Error during API request: {e}")
-        return None
-
 # Streamlit UI
 st.set_page_config(page_title="SEC Filing Analyzer", layout="wide")
 st.title("📊 SEC Extract")
@@ -175,14 +8,19 @@ with st.sidebar:
     
     # Task Selection
     task = st.radio("Select Task", ["Task 1: 10-Q Filings", "Task 2: URL Text Extraction"])
-
-    # Additional Option: Codes and Documentation
-    st.header("Download Files")
-    st.subheader("Available Files:")
-    st.markdown("[Combined Task 1 & Task 2 with UI (Python)](data/combined_tsk1_tsk2_with_ui.py)", unsafe_allow_html=True)
-    st.markdown("[Simple Task 1 (Python)](data/simple_task1.py)", unsafe_allow_html=True)
-    st.markdown("[Simple Task 2 (Python)](data/simple_task2.py)", unsafe_allow_html=True)
-    st.markdown("[Documentation (PDF)](data/documentation.pdf)", unsafe_allow_html=True)
+    
+    # Code Files Dropdown
+    st.header("Code Files")
+    file_option = st.selectbox(
+        "Select Code/Documentation",
+        [
+            "Select File", 
+            "combined_tsk1_tsk2_with_ui.py", 
+            "simple_task1.py", 
+            "simple_task2.py", 
+            "documentation.pdf"
+        ]
+    )
 
 # Debug: Check which task is selected
 st.write(f"Selected Task: {task}")
@@ -280,3 +118,20 @@ elif task == "Task 2: URL Text Extraction":
                         st.warning("AI processing did not return results.")
         else:
             st.warning("Please enter a valid SEC filing URL.")
+
+# Display Code or Documentation based on user selection
+if file_option != "Select File":
+    file_path = f"data/{file_option}"
+    
+    try:
+        with open(file_path, "r") as file:
+            if file_option.endswith(".py"):
+                # Display Python code with pretty formatting
+                code = file.read()
+                st.code(code, language='python')
+            elif file_option.endswith(".pdf"):
+                # Display PDF (since it's documentation)
+                st.write("### Documentation")
+                st.markdown(f'<embed src="{file_path}" width="100%" height="600px" type="application/pdf">', unsafe_allow_html=True)
+    except Exception as e:
+        st.error(f"Error loading file: {e}")
