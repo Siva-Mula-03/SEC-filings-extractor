@@ -4,6 +4,11 @@ import pandas as pd
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 import re
+import time
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
 
 # SEC Base URL
 BASE_URL = "https://www.sec.gov"
@@ -125,6 +130,34 @@ def extract_section_text(doc_url, start_section=None, end_section=None):
         st.error(f"Extraction error: {str(e)}")
         return None
 
+# Function to initialize Selenium WebDriver
+def init_driver():
+    options = webdriver.ChromeOptions()
+    options.add_argument("--headless")  # Run in headless mode (no UI)
+    options.add_argument("--no-sandbox")
+    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=options)
+    return driver
+
+# Function to fetch document content using Selenium
+def fetch_document_content_selenium(doc_url):
+    driver = init_driver()
+    driver.get(doc_url)
+    
+    # Wait for the page to load fully (you can adjust this time if needed)
+    time.sleep(5)
+    
+    # Try to extract the text or content from the page
+    try:
+        # Get the full page text content
+        page_content = driver.page_source
+        driver.quit()
+        
+        return page_content
+    except Exception as e:
+        driver.quit()
+        st.error(f"Error fetching document content: {e}")
+        return None
+
 # Function to send a message to the groq API and get a response
 def process_with_groq(text):
     headers = {
@@ -154,7 +187,6 @@ def process_with_groq(text):
         return None
 
 
-
 # Streamlit UI
 st.set_page_config(page_title="SEC Filing Analyzer", layout="wide")
 st.title("📊 SEC Filing & Document Extractor")
@@ -162,7 +194,7 @@ st.title("📊 SEC Filing & Document Extractor")
 with st.sidebar:
     st.header("Configuration")
     task = st.radio("Select Task", ["Task 1: 10-Q Filings", "Task 2: Document Extraction"])
-    
+
 if task == "Task 1: 10-Q Filings":
     st.header("🔍 Fetch 10-Q Filings")
     col1, col2 = st.columns([1, 2])
@@ -209,45 +241,36 @@ if task == "Task 1: 10-Q Filings":
         if not st.session_state.filtered_df.empty:
             col1, col2 = st.columns(2)
             with col1:
-                csv = st.session_state.filtered_df.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label="📥 Download as CSV",
-                    data=csv,
-                    file_name=f"10Q_filings_{year}_Q{'-'.join(map(str, quarters))}.csv",
-                    mime='text/csv'
+                selected_filing = st.selectbox(
+                    "Select Filing",
+                    st.session_state.filtered_df['URL']
                 )
             with col2:
-                txt = st.session_state.filtered_df.to_string(index=False).encode('utf-8')
-                st.download_button(
-                    label="📥 Download as TXT",
-                    data=txt,
-                    file_name=f"10Q_filings_{year}_Q{'-'.join(map(str, quarters))}.txt",
-                    mime='text/plain'
-                )
+                if st.button("Extract Document"):
+                    doc_url = get_document_url(selected_filing)
+                    if doc_url:
+                        st.session_state.doc_url = doc_url
+                        st.success(f"Document URL: {doc_url}")
+                    else:
+                        st.error("Document not found.")
+            
+            if 'doc_url' in st.session_state:
+                content = fetch_document_content_selenium(st.session_state.doc_url)
+                if content:
+                    st.write(content)
 
 elif task == "Task 2: Document Extraction":
-    st.header("📑 Extract SEC Document Section")
+    st.header("📝 Extract Document Content")
+    url = st.text_input("Enter SEC Filing URL")
     
-    with st.expander("ℹ️ How to use", expanded=True):
-        st.write("""
-        1. Paste the SEC Filing URL for the document you want to extract from.
-        2. Specify the sections of the document (optional).
-        3. Extract the document and let the AI analyze its contents.
-        """)
-
-    doc_url = st.text_input("Enter SEC Filing URL", value="https://www.sec.gov/Archives/edgar/data/320193/000032019323000010/apple-10q_2023q1.htm")
-    start_section = st.text_input("Enter start section (optional)")
-    end_section = st.text_input("Enter end section (optional)")
-
-    if st.button("Extract Section"):
-        with st.spinner("Extracting document..."):
-            content = extract_section_text(doc_url, start_section, end_section)
-            if content:
-                st.write("### Extracted Content")
-                st.write("\n".join(content))
-                
-                st.write("### Processing with AI...")
-                ai_results = process_with_groq(content)
-                if ai_results:
-                    st.write("### AI Analysis Result")
-                    st.markdown(ai_results)
+    if st.button("Extract Document"):
+        if url:
+            doc_url = get_document_url(url)
+            if doc_url:
+                content = fetch_document_content_selenium(doc_url)
+                if content:
+                    st.write(content)
+                else:
+                    st.error("Failed to extract document content.")
+            else:
+                st.error("Document URL not found.")
