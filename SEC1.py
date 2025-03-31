@@ -4,6 +4,7 @@ import pandas as pd
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 import re
+import os
 
 # SEC Base URL
 BASE_URL = "https://www.sec.gov"
@@ -164,10 +165,6 @@ def process_with_groq(text):
         print(f"Error during API request: {e}")
         return None
 
-
-import streamlit as st
-import os
-
 # Set page config
 st.set_page_config(page_title="SEC Filing Analyzer", layout="wide")
 st.title("📊 SEC Extract")
@@ -175,15 +172,14 @@ st.title("📊 SEC Extract")
 # Sidebar: Task Selection
 with st.sidebar:
     st.header("Configuration")
-    task = st.radio("Select Task", ["Task 1: 10-Q Filings", "Task 2: URL Text Extraction", "Code Files"])
+    task = st.radio("Select Task", ["Task 1: 10-Q Filings", "Task 2: URL Text Extraction", "Task 3: Code Files & Documentation"])
 
-    # Add dropdown for code files selection
-    if task == "Code Files":
+    # Add dropdown for code files selection under Task 3
+    if task == "Task 3: Code Files & Documentation":
         codefile = st.selectbox("Select Code File", [
             "combined_tsk1_tsk2_with_ui.py",
             "simple_task1.py",
             "simple_task2.py",
-            "SEC.py",
             "documentation.pdf"
         ])
 
@@ -283,15 +279,30 @@ elif task == "Task 2: URL Text Extraction":
         else:
             st.warning("Please enter a valid SEC filing URL.")
 
-elif task == "Code Files":
+elif task == "Task 3: Code Files & Documentation":
     st.header("📄 Code Files and Documentation")
 
     # Checking if the codefile dropdown is selected
     if codefile:
         try:
             file_path = os.path.join(os.getcwd(), codefile)
-            with open(file_path, "r") as file:
-                code = file.read()
-                st.code(code, language='python')
+            if os.path.exists(file_path):
+                with open(file_path, "r") as file:
+                    code = file.read()
+                    # If it's a python file, display as Python code
+                    if codefile.endswith('.py'):
+                        st.code(code, language='python')
+                    # If it's a pdf, display it as a download option
+                    elif codefile.endswith('.pdf'):
+                        with open(file_path, "rb") as pdf_file:
+                            st.download_button(
+                                label="📥 Download Documentation",
+                                data=pdf_file,
+                                file_name="documentation.pdf",
+                                mime="application/pdf"
+                            )
+            else:
+                st.error("File not found. Please check the file name or path.")
         except Exception as e:
             st.error(f"Error reading file: {str(e)}")
+
