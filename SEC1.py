@@ -11,7 +11,7 @@ BASE_URL = "https://www.sec.gov"
 
 # Headers to avoid 403 Forbidden errors
 HEADERS = {
-    'User-Agent': 'Company Name - Your Name - your.email@example.com',
+    'User-Agent': 'Siva Nehesh - For Research - siva.nehesh@example.com',
     'Accept-Encoding': 'gzip, deflate',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     'Connection': 'keep-alive'
