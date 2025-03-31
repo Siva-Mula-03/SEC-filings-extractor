@@ -143,13 +143,16 @@ def process_with_groq(text):
     try:
         response = requests.post(API_URL, headers=headers, json=data)
         response.raise_for_status()  # Raise an exception for HTTP errors
-
+        print(f"API response status: {response.status_code}")  # Log status
         response_data = response.json()
+        print(f"Response Data: {response_data}")  # Log response data
+
         return response_data['choices'][0]['message']['content']
     
     except requests.exceptions.RequestException as e:
         print(f"Error during API request: {e}")
         return None
+
 
 
 # Streamlit UI
