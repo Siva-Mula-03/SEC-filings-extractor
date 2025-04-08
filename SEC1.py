@@ -8,6 +8,7 @@ import xml.etree.ElementTree as ET
 import matplotlib.pyplot as plt
 import seaborn as sns
 import time
+from datetime import date
 
 # Configuration
 SEC_API = "https://data.sec.gov/submissions"
@@ -24,33 +25,64 @@ if 'financial_data' not in st.session_state:
     st.session_state.financial_data = []
 
 # Core Functions
+def normalize_cik(cik):
+    """Convert CIK to proper format for SEC API (no leading zeros)"""
+    return str(int(cik.strip()))
+
+def check_company_exists(cik):
+    """Verify if CIK exists in SEC database"""
+    try:
+        cik = normalize_cik(cik)
+        url = f"{SEC_API}/CIK{cik}.json"
+        response = requests.head(url, headers=HEADERS, timeout=5)
+        return response.status_code == 200
+    except:
+        return False
+
 @st.cache_data(show_spinner=False)
 def get_company_filings(cik, form_type, start_date, end_date):
-    """Fetch SEC filings with proper CIK handling"""
+    """Fetch SEC filings with proper error handling"""
     try:
-        # Proper CIK formatting for API
-        cik = cik.strip().lstrip('0')  # Remove leading zeros for API
+        cik = normalize_cik(cik)
+        if not cik or not check_company_exists(cik):
+            return []
+            
         url = f"{SEC_API}/CIK{cik}.json"
-        
-        response = requests.get(url, headers=HEADERS)
+        response = requests.get(url, headers=HEADERS, timeout=10)
         response.raise_for_status()
         filings_data = response.json()
         
         filings = []
         for filing in filings_data['filings']['recent']:
-            filing_date = datetime.strptime(filing['filingDate'], '%Y-%m-%d').date()
-            if (filing['form'].upper() == form_type and 
-                start_date <= filing_date <= end_date):
-                filings.append({
-                    'form': filing['form'],
-                    'filingDate': filing_date,
-                    'accessionNumber': filing['accessionNumber'].replace('-', ''),
-                    'primaryDoc': filing['primaryDocument']
-                })
+            try:
+                filing_date = datetime.strptime(filing['filingDate'], '%Y-%m-%d').date()
+                if (filing['form'].upper() == form_type.upper() and 
+                    start_date <= filing_date <= end_date):
+                    filings.append({
+                        'form': filing['form'],
+                        'filingDate': filing_date,
+                        'accessionNumber': filing['accessionNumber'].replace('-', ''),
+                        'primaryDoc': filing['primaryDocument']
+                    })
+            except:
+                continue
+        
+        # Show available filing dates if none found
+        if not filings:
+            all_dates = sorted(list(set(
+                datetime.strptime(f['filingDate'], '%Y-%m-%d').date()
+                for f in filings_data['filings']['recent']
+                if f['form'].upper() == form_type.upper()
+            )))
+            st.warning(f"No {form_type} filings found in date range. Available dates: {', '.join(str(d) for d in all_dates)}")
+        
         return filings
     
     except requests.exceptions.HTTPError as e:
-        st.error(f"SEC API Error: {e.response.status_code} - {e.response.reason}")
+        if e.response.status_code == 404:
+            st.error("Company not found. Please verify the CIK number.")
+        else:
+            st.error(f"SEC API Error: {e.response.status_code}")
         return []
     except Exception as e:
         st.error(f"Error fetching filings: {str(e)}")
@@ -65,7 +97,7 @@ def extract_xbrl_facts(filing_url):
     try:
         # Get XBRL URL from filing URL
         xbrl_url = filing_url.replace('-10q_', '-xbrl_').replace('.htm', '.xml')
-        response = requests.get(xbrl_url, headers=HEADERS)
+        response = requests.get(xbrl_url, headers=HEADERS, timeout=10)
         response.raise_for_status()
         
         # Parse XML with proper namespaces
@@ -89,23 +121,12 @@ def extract_xbrl_facts(filing_url):
         
         for concept, key in concepts.items():
             elem = root.find(f'.//us-gaap:{concept}', ns)
-            if elem is not None:
-                facts[key] = {
-                    'value': elem.text,
-                    'context': elem.attrib.get('contextRef', ''),
-                    'unit': elem.attrib.get('unitRef', 'USD'),
-                    'decimals': elem.attrib.get('decimals', '0')
-                }
+            if elem is not None and elem.text:
+                try:
+                    facts[key] = float(elem.text.replace(',', ''))
+                except ValueError:
+                    continue
         
-        # Add filing metadata
-        elem = root.find('.//dei:DocumentType', ns)
-        if elem is not None:
-            facts['document_type'] = elem.text
-            
-        elem = root.find('.//dei:DocumentPeriodEndDate', ns)
-        if elem is not None:
-            facts['period_end'] = elem.text
-            
         return facts
     
     except Exception as e:
@@ -141,20 +162,27 @@ def show_financial_analysis():
     
     col1, col2 = st.columns(2)
     with col1:
-        cik = st.text_input("Enter Company CIK", "0000790652", 
+        cik = st.text_input("Enter Company CIK", "0000320193",  # Default to Apple for demo
                            help="Example: Apple = 0000320193, Microsoft = 0000789019")
     with col2:
         report_type = st.selectbox("Select Report Type", ["10-Q", "10-K"])
     
     col3, col4 = st.columns(2)
     with col3:
-        start_date = st.date_input("Start Date", value=datetime(2023, 1, 1))
+        start_date = st.date_input("Start Date", value=date(2024, 1, 1))
     with col4:
-        end_date = st.date_input("End Date", value=datetime(2024, 12, 31))
+        end_date = st.date_input("End Date", value=date.today())
     
     if st.button("Analyze Filings"):
+        if not cik or not cik.strip().isdigit():
+            st.error("Please enter a valid CIK number")
+            return
+            
+        if not check_company_exists(cik):
+            st.error("Company not found in SEC database. Please verify the CIK.")
+            return
+            
         with st.spinner("Processing SEC filings..."):
-            # Get filings with proper CIK handling
             filings = get_company_filings(cik, report_type, start_date, end_date)
             
             if filings:
@@ -178,24 +206,20 @@ def show_financial_analysis():
                         facts = extract_xbrl_facts(filing_url)
                         
                         if facts:
-                            # Convert to numeric values
-                            try:
-                                financial_data.append({
-                                    'date': filing['filingDate'],
-                                    'assets': float(facts.get('assets', {}).get('value', 0)),
-                                    'revenue': float(facts.get('revenue', {}).get('value', 0)),
-                                    'eps': float(facts.get('eps', {}).get('value', 0)),
-                                    'shares': float(facts.get('shares', {}).get('value', 0)),
-                                    'url': filing_url
-                                })
-                            except (ValueError, AttributeError):
-                                continue
+                            financial_data.append({
+                                'date': filing['filingDate'],
+                                'assets': facts.get('assets', 0),
+                                'revenue': facts.get('revenue', 0),
+                                'eps': facts.get('eps', 0),
+                                'shares': facts.get('shares', 0),
+                                'url': filing_url
+                            })
                 
                 if financial_data:
                     st.session_state.financial_data = pd.DataFrame(financial_data)
                     show_analysis_results(cik, report_type)
                 else:
-                    st.warning("No financial data could be extracted")
+                    st.warning("No financial data could be extracted from these filings")
             else:
                 st.warning("No filings found in selected date range")
 
@@ -208,23 +232,24 @@ def show_analysis_results(cik, report_type):
     cols = st.columns(4)
     with cols[0]:
         st.metric("Latest Assets", f"${df['assets'].iloc[-1]:,.0f}", 
-                 f"{df['assets'].pct_change().iloc[-1]:.1%}")
+                 f"{df['assets'].pct_change().iloc[-1]:.1%}" if len(df) > 1 else "N/A")
     with cols[1]:
         st.metric("Latest Revenue", f"${df['revenue'].iloc[-1]:,.0f}", 
-                 f"{df['revenue'].pct_change().iloc[-1]:.1%}")
+                 f"{df['revenue'].pct_change().iloc[-1]:.1%}" if len(df) > 1 else "N/A")
     with cols[2]:
         st.metric("Latest EPS", f"${df['eps'].iloc[-1]:.2f}", 
-                 f"{df['eps'].pct_change().iloc[-1]:.1%}")
+                 f"{df['eps'].pct_change().iloc[-1]:.1%}" if len(df) > 1 else "N/A")
     with cols[3]:
         st.metric("Shares Outstanding", f"{df['shares'].iloc[-1]:,.0f}")
     
     # Trend Visualization
-    st.subheader("Trend Analysis")
-    fig, ax = plt.subplots(figsize=(10, 6))
-    df.set_index('date').plot(y=['assets', 'revenue'], ax=ax)
-    plt.title("Assets vs Revenue Trend")
-    plt.ylabel("USD")
-    st.pyplot(fig)
+    if len(df) > 1:
+        st.subheader("Trend Analysis")
+        fig, ax = plt.subplots(figsize=(10, 6))
+        df.set_index('date').plot(y=['assets', 'revenue'], ax=ax)
+        plt.title("Assets vs Revenue Trend")
+        plt.ylabel("USD")
+        st.pyplot(fig)
     
     # AI Insights
     st.subheader("🧠 AI Analysis")
@@ -268,12 +293,13 @@ def main():
         st.markdown("- Apple: 0000320193")
         st.markdown("- Microsoft: 0000789019")
         st.markdown("- Amazon: 0001018724")
+        st.markdown("- Tesla: 0001318605")
     
     if task == "Financial Analysis":
         show_financial_analysis()
     elif task == "View All Filings":
-        cik = st.text_input("Enter CIK to view all filings", "0000790652")
-        if cik:
+        cik = st.text_input("Enter CIK to view all filings", "0000320193")
+        if cik and cik.strip().isdigit():
             st.markdown(f"[View All Filings for CIK {cik}](https://www.sec.gov/edgar/browse/?CIK={cik.zfill(10)})")
     elif task == "Document Extraction":
         st.warning("Document extraction feature coming soon!")
