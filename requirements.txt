@@ -7,3 +7,4 @@ openai
 selenium
 webdriver_manager
 matplotlib
+seaborn
