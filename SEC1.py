@@ -207,21 +207,10 @@ def parse_html_filing(content):
         st.error(f"HTML parsing error: {str(e)}")
         return None
 
-def parse_numeric_value(text):
-    """Convert text to numeric value with improved parsing"""
-    try:
-        # Remove parentheses (used for negative numbers in accounting)
-        text = text.replace('(', '-').replace(')', '')
-        # Remove common non-numeric characters except decimal point and minus sign
-        cleaned = re.sub(r'[^\d.-]', '', text)
-        return float(cleaned)
-    except:
-        return None
-
 def extract_financial_data(filing_url):
-    """Extract financial data from filing document with better error handling"""
+    """Enhanced financial data extraction with multiple fallback methods"""
     try:
-        # First try to get the actual document URL from the index page
+        # First get the actual document content
         if '/ix?doc=' in filing_url:
             response = requests.get(filing_url, headers=HEADERS, timeout=15)
             response.raise_for_status()
@@ -232,92 +221,101 @@ def extract_financial_data(filing_url):
         
         response = requests.get(filing_url, headers=HEADERS, timeout=15)
         response.raise_for_status()
+        content = response.text
         
-        content = response.content
+        # Method 1: Try to find direct XBRL data
+        xbrl_url = filing_url.replace('.htm', '.xml').replace('.html', '.xml')
+        xbrl_response = requests.get(xbrl_url, headers=HEADERS, timeout=10)
+        if xbrl_response.status_code == 200:
+            xbrl_data = parse_xbrl_filing(xbrl_response.content)
+            if xbrl_data:
+                return xbrl_data
         
-        # Try XBRL first
-        xbrl_data = parse_xbrl_filing(content)
-        if xbrl_data and any(xbrl_data.values()):
-            return xbrl_data
-            
-        # Fall back to HTML parsing with improved table detection
-        html_data = parse_html_filing(content)
-        if html_data and any(html_data.values()):
-            return html_data
-            
-        # If we still haven't found data, try to find financial statements links
+        # Method 2: Improved HTML table parsing
         soup = BeautifulSoup(content, 'html.parser')
-        financial_links = []
-        for link in soup.find_all('a', href=True):
-            if any(term in link.text.lower() for term in ['financial', 'statement', 'balance sheet', 'income']):
-                financial_links.append(urljoin(filing_url, link['href']))
         
-        # Try each financial statement link
-        for link in financial_links[:3]:  # Limit to first 3 links
-            try:
-                stmt_response = requests.get(link, headers=HEADERS, timeout=10)
-                stmt_response.raise_for_status()
-                stmt_data = parse_html_filing(stmt_response.content)
-                if stmt_data and any(stmt_data.values()):
-                    return stmt_data
-            except:
-                continue
-                
-        st.warning("Could not automatically extract financial data from this filing. Please check the filing manually.")
-        return None
+        # Remove unwanted elements
+        for element in soup(['script', 'style', 'meta', 'link', 'nav', 'header', 'footer']):
+            element.decompose()
+        
+        financial_data = {}
+        
+        # Look for specific tables by common patterns
+        table_patterns = [
+            ('consolidated balance sheet', ['total assets', 'current assets', 
+                                          'total liabilities', 'current liabilities']),
+            ('consolidated statement of operations', ['revenue', 'net income']),
+            ('consolidated statement of cash flows', ['cash and cash equivalents'])
+        ]
+        
+        for pattern, fields in table_patterns:
+            table = find_table_by_header(soup, pattern)
+            if table:
+                for row in table.find_all('tr'):
+                    cells = [cell.get_text(strip=True).lower() for cell in row.find_all(['td', 'th'])]
+                    for i in range(len(cells)-1):
+                        for field in fields:
+                            if field in cells[i]:
+                                value = parse_numeric_value(cells[i+1])
+                                if value is not None:
+                                    financial_data[field.replace(' ', '_')] = value
+        
+        # Method 3: Search for specific financial terms
+        if not financial_data:
+            term_mapping = {
+                'total assets': 'total_assets',
+                'current assets': 'current_assets',
+                'total liabilities': 'total_liabilities',
+                'current liabilities': 'current_liabilities',
+                'revenue': 'revenue',
+                'net income': 'net_income',
+                'cash and cash equivalents': 'cash'
+            }
+            
+            for term, key in term_mapping.items():
+                elements = soup.find_all(string=re.compile(term, re.IGNORECASE))
+                for element in elements:
+                    parent = element.find_parent()
+                    if parent:
+                        siblings = parent.find_next_siblings()
+                        for sibling in siblings[:3]:  # Check next 3 siblings
+                            value = parse_numeric_value(sibling.get_text(strip=True))
+                            if value is not None and key not in financial_data:
+                                financial_data[key] = value
+        
+        return financial_data if financial_data else None
         
     except Exception as e:
         st.error(f"Error processing filing: {str(e)}")
         return None
 
-def analyze_financials(financial_data, filing_info):
-    """Generate financial analysis with proper NULL handling"""
-    if not financial_data or all(v is None for v in financial_data.values()):
-        return "⚠️ Could not extract financial data from this filing. Please check the filing manually."
+def find_table_by_header(soup, header_text):
+    """Find a table that has the given header text"""
+    headers = soup.find_all(string=re.compile(header_text, re.IGNORECASE))
+    for header in headers:
+        parent = header.find_parent()
+        while parent:
+            if parent.name == 'table':
+                return parent
+            parent = parent.find_parent()
+    return None
+
+def parse_numeric_value(text):
+    """More robust numeric value parsing"""
+    if not text:
+        return None
     
-    analysis = []
+    # Handle accounting format (parentheses for negatives)
+    text = text.strip().replace('(', '-').replace(')', '')
     
-    # Basic metrics (only show if we have data)
-    analysis.append("### Key Financial Metrics")
-    if financial_data.get('revenue') is not None:
-        analysis.append(f"- **Revenue**: ${financial_data['revenue']:,.2f}")
-    if financial_data.get('net_income') is not None:
-        analysis.append(f"- **Net Income**: ${financial_data['net_income']:,.2f}")
-    if financial_data.get('operating_income') is not None:
-        analysis.append(f"- **Operating Income**: ${financial_data['operating_income']:,.2f}")
+    # Remove non-numeric characters except decimal point and minus sign
+    cleaned = re.sub(r'[^\d.-]', '', text)
     
-    # Balance Sheet Analysis (only if we have both assets and liabilities)
-    if (financial_data.get('total_assets') is not None and 
-        financial_data.get('total_liabilities') is not None):
-        equity = financial_data['total_assets'] - financial_data['total_liabilities']
-        debt_to_equity = financial_data['total_liabilities'] / equity if equity != 0 else float('inf')
-        analysis.append("\n### Balance Sheet Analysis")
-        analysis.append(f"- **Total Assets**: ${financial_data['total_assets']:,.2f}")
-        analysis.append(f"- **Total Liabilities**: ${financial_data['total_liabilities']:,.2f}")
-        analysis.append(f"- **Shareholders' Equity**: ${equity:,.2f}")
-        analysis.append(f"- **Debt-to-Equity Ratio**: {debt_to_equity:.2f} {'(High Risk)' if debt_to_equity > 2 else '(Moderate)' if debt_to_equity > 1 else '(Low Risk)'}")
-    
-    # Liquidity Analysis (only if we have current assets/liabilities)
-    if (financial_data.get('current_assets') is not None and 
-        financial_data.get('current_liabilities') is not None):
-        current_ratio = financial_data['current_assets'] / financial_data['current_liabilities']
-        quick_ratio = (financial_data.get('cash', 0)) / financial_data['current_liabilities']
-        analysis.append("\n### Liquidity Analysis")
-        analysis.append(f"- **Current Ratio**: {current_ratio:.2f} {'(Strong)' if current_ratio > 2 else '(Adequate)' if current_ratio > 1 else '(Weak)'}")
-        if financial_data.get('cash') is not None:
-            analysis.append(f"- **Quick Ratio**: {quick_ratio:.2f} {'(Strong)' if quick_ratio > 1 else '(Adequate)' if quick_ratio > 0.5 else '(Weak)'}")
-    
-    # Profitability Analysis (only if we have both revenue and net income)
-    if (financial_data.get('revenue') is not None and 
-        financial_data.get('net_income') is not None):
-        profit_margin = (financial_data['net_income'] / financial_data['revenue']) * 100
-        analysis.append("\n### Profitability Analysis")
-        analysis.append(f"- **Profit Margin**: {profit_margin:.2f}% {'(Excellent)' if profit_margin > 20 else '(Good)' if profit_margin > 10 else '(Marginal)'}")
-    
-    if len(analysis) == 1:  # Only has the header
-        return "⚠️ Found some financial data but not enough to generate meaningful analysis."
-    
-    return "\n".join(analysis)
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+        
 def visualize_financials(financial_data):
     """Create visualizations of financial data"""
     figs = []
