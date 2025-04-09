@@ -1,5 +1,5 @@
-st.set_page_config(page_title="SEC Filing Analyzer", layout="wide")
 import streamlit as st
+st.set_page_config(page_title="SEC Filing Analyzer", layout="wide")
 import requests
 import pandas as pd
 from bs4 import BeautifulSoup
