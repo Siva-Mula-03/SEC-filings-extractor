@@ -31,26 +31,41 @@ def normalize_cik(cik):
 
 def get_company_filings(cik, form_type, start_date, end_date):
     try:
-        # Remove leading zeros for API call
-        api_cik = str(int(cik))  
+        api_cik = str(int(cik))
         url = f"{SEC_API}/CIK{api_cik}.json"
         
-        response = requests.get(url, headers=HEADERS)
-        filings_data = response.json()
+        response = requests.get(url, headers=HEADERS, timeout=15)
         
-        filings = []
-        for filing in filings_data['filings']['recent']:
-            # Convert string dates properly
-            filing_date = datetime.strptime(filing['filingDate'], '%Y-%m-%d').date()
+        if response.status_code != 200:
+            st.error(f"SEC API Error: {response.status_code}")
+            return []
             
-            # Check both form type AND date range
-            if (filing['form'].upper() == form_type.upper() and 
-                filing_date >= start_date and 
-                filing_date <= end_date):
-                filings.append(filing)
+        if not response.text.strip():
+            st.error("Empty response from SEC - try again later")
+            return []
+            
+        filings_data = response.json()
+        filings = []
+        
+        for filing in filings_data.get('filings', {}).get('recent', []):
+            try:
+                filing_date = datetime.strptime(filing['filingDate'], '%Y-%m-%d').date()
+                if (filing['form'].upper() == form_type.upper() and 
+                    start_date <= filing_date <= end_date):
+                    filings.append(filing)
+            except:
+                continue
+                
+        if not filings:
+            all_filings = filings_data['filings']['recent']
+            available = [
+                f['filingDate'] for f in all_filings 
+                if f['form'].upper() == form_type.upper()
+            ]
+            st.warning(f"No {form_type} filings found. Available dates: {', '.join(available)}")
         
         return filings
-
+        
     except Exception as e:
         st.error(f"Error: {str(e)}")
         return []
