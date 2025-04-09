@@ -310,6 +310,9 @@ def main():
                 with st.spinner("Fetching filings..."):
                     filings = get_company_filings(cik, report_type, start_date, end_date)
                     st.session_state.filings = filings
+                    st.session_state.analysis_done = False
+                    st.session_state.financial_data = None
+                    st.session_state.selected_filing = None
         
         elif analysis_type == "Direct Filing":
             filing_url = st.text_input("Filing URL", value="https://www.sec.gov/ix?doc=/Archives/edgar/data/0000790652/000121390024098306/ea0220916-10q_imaging.htm")
@@ -319,60 +322,45 @@ def main():
                     financial_data = extract_financial_data(filing_url)
                     st.session_state.financial_data = financial_data
                     st.session_state.analysis_done = True
+                    st.session_state.selected_filing = {'form': 'Direct URL', 'filingDate': '', 'accessionNumber': '', 'primaryDocument': ''}
     
-    # Main Content Area
-    if st.session_state.get('filings'):
-        st.header("Available Filings")
-        selected = st.selectbox(
-            "Select Filing to Analyze",
-            options=range(len(st.session_state.filings)),
-            format_func=lambda i: f"{st.session_state.filings[i]['form']} - {st.session_state.filings[i]['filingDate']}"
-        )
-        
-        if st.button("Analyze Selected"):
-            filing = st.session_state.filings[selected]
-            filing_url = get_full_filing_url(
-                normalize_cik(cik),
-                filing['accessionNumber'],
-                filing['primaryDocument']
-            )
-            with st.spinner("Analyzing..."):
-                financial_data = extract_financial_data(filing_url)
-                st.session_state.financial_data = financial_data
-                st.session_state.analysis_done = True
-    
-    # Display Analysis Results
-    if st.session_state.analysis_done and st.session_state.financial_data:
-        st.header("Financial Analysis")
-        
-        with st.expander("Raw Data Preview"):
-            st.json(st.session_state.financial_data)
-        
-        analysis_text, visualizations = analyze_and_visualize(st.session_state.financial_data)
-        st.markdown(analysis_text)
-        
-        for fig in visualizations:
-            st.plotly_chart(fig, use_container_width=True, theme="streamlit")
-    
-    # Sidebar Chat Interface
-    with st.sidebar:
-        st.markdown("---")
-        st.header("💬 Filing Assistant")
-        
-        # Chat History
-        for msg in st.session_state.chat_history[-5:]:  # Show last 5 messages
-            if msg['role'] == 'user':
-                st.markdown(f"<div class='chat-message user-message'>👤 {msg['content']}</div>", unsafe_allow_html=True)
-            else:
-                st.markdown(f"<div class='chat-message bot-message'>🤖 {msg['content']}</div>", unsafe_allow_html=True)
-        
-        # Chat Input
-        query = st.text_input("Ask about this filing:", key="chat_input")
-        if query:
-            st.session_state.chat_history.append({'role': 'user', 'content': query})
-            response = handle_chat_query(query, st.session_state.get('financial_data'))
-            st.session_state.chat_history.append({'role': 'assistant', 'content': response})
-            st.experimental_rerun()
+    # Display filings if searched
+    if analysis_type == "Company Search" and 'filings' in st.session_state and st.session_state.filings:
+        st.subheader("Available Filings")
+        for i, filing in enumerate(st.session_state.filings):
+            col1, col2 = st.columns([4, 1])
+            with col1:
+                st.markdown(f"**{filing['form']}** - {filing['filingDate']} - Accession #: `{filing['accessionNumber']}`")
+            with col2:
+                if st.button("Analyze", key=f"analyze_{i}"):
+                    accession = filing['accessionNumber'].replace("-", "")
+                    cik = normalize_cik(cik)
+                    filing_url = f"{BASE_URL}/Archives/edgar/data/{cik}/{accession}/{filing['primaryDocument']}"
+                    with st.spinner("Processing filing..."):
+                        financial_data = extract_financial_data(filing_url)
+                        st.session_state.financial_data = financial_data
+                        st.session_state.analysis_done = True
+                        st.session_state.selected_filing = filing
 
-if __name__ == "__main__":
-    main()
+    # Display analysis results
+    if st.session_state.analysis_done and st.session_state.financial_data:
+        st.subheader("📊 Financial Analysis")
+        analysis_text, charts = analyze_and_visualize(st.session_state.financial_data)
+        st.markdown(analysis_text)
+        for fig in charts:
+            st.plotly_chart(fig, use_container_width=True)
+    
+    # Chat Interface
+    if st.session_state.analysis_done and st.session_state.financial_data:
+        st.subheader("💬 Ask Questions About the Filing")
+        user_input = st.text_input("Your question", key="chat_input")
+        if st.button("Ask"):
+            if user_input:
+                response = handle_chat_query(user_input, st.session_state.financial_data)
+                st.session_state.chat_history.append(("user", user_input))
+                st.session_state.chat_history.append(("bot", response))
+        
+        # Display chat history
+        for sender, message in st.session_state.chat_history:
+            css_class = "user-message" if sender == "user" else "bot-message"
+            st.markdown(f'<div class="chat-message {css_class}">{message}</div>', unsafe_allow_html=True)
