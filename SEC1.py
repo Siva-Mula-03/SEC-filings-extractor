@@ -33,7 +33,7 @@ def get_company_filings(cik, form_type, start_date, end_date):
             st.error("Invalid CIK format")
             return None
             
-        url = f"{SUBMISSIONS_API}/CIK{normalized_cik}.json"
+        url = f"https://data.sec.gov/submissions/CIK{normalized_cik}.json"
         
         response = requests.get(url, headers=HEADERS, timeout=15)
         
@@ -45,24 +45,30 @@ def get_company_filings(cik, form_type, start_date, end_date):
         filings = []
         
         # Process recent filings
-        for filing in filings_data.get('filings', {}).get('recent', []):
-            try:
-                filing_date = datetime.strptime(filing['filingDate'], '%Y-%m-%d').date()
-                if (filing['form'].upper() == form_type.upper() and 
-                    start_date <= filing_date <= end_date):
-                    filings.append({
-                        'form': filing['form'],
-                        'filingDate': filing_date,
-                        'accessionNumber': filing['accessionNumber'],
-                        'primaryDocument': filing['primaryDocument']
-                    })
-            except Exception as e:
-                continue
-                
-        # Process historical filings if available
+        recent_filings = filings_data.get('filings', {}).get('recent', {})
+        if recent_filings:
+            # Get indices of filings that match our criteria
+            matching_indices = [
+                i for i in range(len(recent_filings['accessionNumber']))
+                if (recent_filings['form'][i].upper() == form_type.upper() and
+                    datetime.strptime(recent_filings['filingDate'][i], '%Y-%m-%d').date() >= start_date and
+                    datetime.strptime(recent_filings['filingDate'][i], '%Y-%m-%d').date() <= end_date)
+            ]
+            
+            for idx in matching_indices:
+                filings.append({
+                    'form': recent_filings['form'][idx],
+                    'filingDate': datetime.strptime(recent_filings['filingDate'][idx], '%Y-%m-%d').date(),
+                    'reportDate': recent_filings['reportDate'][idx] if 'reportDate' in recent_filings else None,
+                    'accessionNumber': recent_filings['accessionNumber'][idx],
+                    'primaryDocument': recent_filings['primaryDocument'][idx],
+                    'primaryDocDescription': recent_filings['primaryDocDescription'][idx] if 'primaryDocDescription' in recent_filings else None
+                })
+        
+        # Also check historical filings if available
         if 'filings' in filings_data and 'files' in filings_data['filings']:
             for file_info in filings_data['filings']['files']:
-                file_url = f"{SUBMISSIONS_API}/{file_info['name']}"
+                file_url = f"https://data.sec.gov/submissions/{file_info['name']}"
                 file_response = requests.get(file_url, headers=HEADERS)
                 if file_response.status_code == 200:
                     file_data = file_response.json()
@@ -74,16 +80,20 @@ def get_company_filings(cik, form_type, start_date, end_date):
                                 filings.append({
                                     'form': filing['form'],
                                     'filingDate': filing_date,
+                                    'reportDate': filing.get('reportDate'),
                                     'accessionNumber': filing['accessionNumber'],
-                                    'primaryDocument': filing['primaryDocument']
+                                    'primaryDocument': filing['primaryDocument'],
+                                    'primaryDocDescription': filing.get('primaryDocDescription')
                                 })
-                        except:
+                        except Exception as e:
                             continue
         
         if not filings:
             st.warning(f"No {form_type} filings found for CIK {cik} between {start_date} and {end_date}")
             return None
             
+        # Sort by filing date (newest first)
+        filings.sort(key=lambda x: x['filingDate'], reverse=True)
         return filings
         
     except Exception as e:
