@@ -8,3 +8,4 @@ selenium
 webdriver_manager
 matplotlib
 seaborn
+plotly
