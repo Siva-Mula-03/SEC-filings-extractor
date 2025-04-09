@@ -1,5 +1,5 @@
 import streamlit as st
- st.set_page_config(page_title="SEC Filing Analyzer Pro", layout="wide", page_icon="📈")
+st.set_page_config(page_title="SEC Filing Analyzer Pro", layout="wide", page_icon="📈")
 import requests
 import pandas as pd
 from bs4 import BeautifulSoup
