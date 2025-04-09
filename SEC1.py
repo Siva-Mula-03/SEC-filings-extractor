@@ -1,3 +1,4 @@
+st.set_page_config(page_title="SEC Filing Analyzer", layout="wide")
 import streamlit as st
 import requests
 import pandas as pd
@@ -194,9 +195,9 @@ def analyze_financials(financial_data):
     
     return "\n\n".join(analysis)
 
+
 # Streamlit UI
 def main():
-    st.set_page_config(page_title="SEC Filing Analyzer", layout="wide")
     st.title("🔍 SEC Filing Analyzer Pro")
     
     # Sidebar for navigation
