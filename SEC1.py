@@ -72,26 +72,58 @@ def get_company_filings(cik, form_type, start_date, end_date):
 def get_full_filing_url(cik, accession_number, primary_doc):
     """Construct proper SEC filing URL with correct path"""
     accession_no_clean = accession_number.replace("-", "")
-    return f"{BASE_URL}/Archives/edgar/data/{cik}/{accession_no_clean}/{primary_doc}"
+    # Handle both direct document links and index page links
+    if primary_doc.endswith(('.htm', '.html')):
+        return f"{BASE_URL}/Archives/edgar/data/{cik}/{accession_no_clean}/{primary_doc}"
+    else:
+        return f"{BASE_URL}/ix?doc=/Archives/edgar/data/{cik}/{accession_no_clean}/{primary_doc}"
 
 def extract_financial_data(filing_url):
-    """Extract financial data from filing document"""
+    """Extract financial data from filing document with improved handling"""
     try:
+        # First try to get the actual document URL from the index page
+        if '/ix?doc=' in filing_url:
+            response = requests.get(filing_url, headers=HEADERS, timeout=15)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.content, 'html.parser')
+            iframe = soup.find('iframe', {'id': 'edgar-iframe'})
+            if iframe and iframe.get('src'):
+                filing_url = urljoin(BASE_URL, iframe.get('src'))
+        
         response = requests.get(filing_url, headers=HEADERS, timeout=15)
         response.raise_for_status()
         
         content = response.content
         
-        # Try XBRL first
-        xbrl_data = parse_xbrl_filing(content)
-        if xbrl_data:
-            return xbrl_data
-            
-        # Fall back to HTML parsing
+        # Check if this is an XBRL filing
+        if '-xbrl.' in filing_url.lower() or '.xml' in filing_url.lower():
+            xbrl_data = parse_xbrl_filing(content)
+            if xbrl_data:
+                return xbrl_data
+        
+        # Try to find the actual financial statements in HTML
         html_data = parse_html_filing(content)
         if html_data:
             return html_data
             
+        # Fallback: Look for links to financial statements
+        soup = BeautifulSoup(content, 'html.parser')
+        financial_links = []
+        for link in soup.find_all('a', href=True):
+            if 'financial' in link.text.lower() or 'statement' in link.text.lower():
+                financial_links.append(urljoin(filing_url, link['href']))
+        
+        # Try each financial statement link
+        for link in financial_links[:3]:  # Limit to first 3 links to avoid too many requests
+            try:
+                stmt_response = requests.get(link, headers=HEADERS, timeout=10)
+                stmt_response.raise_for_status()
+                stmt_data = parse_html_filing(stmt_response.content)
+                if stmt_data:
+                    return stmt_data
+            except:
+                continue
+                
         return None
         
     except Exception as e:
