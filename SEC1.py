@@ -72,14 +72,10 @@ def get_company_filings(cik, form_type, start_date, end_date):
 def get_full_filing_url(cik, accession_number, primary_doc):
     """Construct proper SEC filing URL with correct path"""
     accession_no_clean = accession_number.replace("-", "")
-    # Handle both direct document links and index page links
-    if primary_doc.endswith(('.htm', '.html')):
-        return f"{BASE_URL}/Archives/edgar/data/{cik}/{accession_no_clean}/{primary_doc}"
-    else:
-        return f"{BASE_URL}/ix?doc=/Archives/edgar/data/{cik}/{accession_no_clean}/{primary_doc}"
+    return f"{BASE_URL}/Archives/edgar/data/{cik}/{accession_no_clean}/{primary_doc}"
 
 def extract_financial_data(filing_url):
-    """Extract financial data from filing document with improved handling"""
+    """Extract financial data from filing document"""
     try:
         # First try to get the actual document URL from the index page
         if '/ix?doc=' in filing_url:
@@ -95,35 +91,16 @@ def extract_financial_data(filing_url):
         
         content = response.content
         
-        # Check if this is an XBRL filing
-        if '-xbrl.' in filing_url.lower() or '.xml' in filing_url.lower():
-            xbrl_data = parse_xbrl_filing(content)
-            if xbrl_data:
-                return xbrl_data
-        
-        # Try to find the actual financial statements in HTML
+        # Try XBRL first
+        xbrl_data = parse_xbrl_filing(content)
+        if xbrl_data:
+            return xbrl_data
+            
+        # Fall back to HTML parsing
         html_data = parse_html_filing(content)
         if html_data:
             return html_data
             
-        # Fallback: Look for links to financial statements
-        soup = BeautifulSoup(content, 'html.parser')
-        financial_links = []
-        for link in soup.find_all('a', href=True):
-            if 'financial' in link.text.lower() or 'statement' in link.text.lower():
-                financial_links.append(urljoin(filing_url, link['href']))
-        
-        # Try each financial statement link
-        for link in financial_links[:3]:  # Limit to first 3 links to avoid too many requests
-            try:
-                stmt_response = requests.get(link, headers=HEADERS, timeout=10)
-                stmt_response.raise_for_status()
-                stmt_data = parse_html_filing(stmt_response.content)
-                if stmt_data:
-                    return stmt_data
-            except:
-                continue
-                
         return None
         
     except Exception as e:
@@ -270,7 +247,7 @@ def analyze_financials(financial_data, filing_info):
     # Liquidity Analysis
     if 'current_assets' in financial_data and 'current_liabilities' in financial_data:
         current_ratio = financial_data['current_assets'] / financial_data['current_liabilities']
-        quick_ratio = (financial_data.get('cash', 0) + financial_data.get('accounts_receivable', 0)) / financial_data['current_liabilities'] if 'current_liabilities' in financial_data else None
+        quick_ratio = (financial_data.get('cash', 0)) / financial_data['current_liabilities'] if 'current_liabilities' in financial_data else None
         analysis.append("\n### Liquidity Analysis")
         analysis.append(f"- **Current Ratio**: {current_ratio:.2f} {'(Strong)' if current_ratio > 2 else '(Adequate)' if current_ratio > 1 else '(Weak)'}")
         if quick_ratio:
@@ -281,12 +258,6 @@ def analyze_financials(financial_data, filing_info):
         profit_margin = (financial_data['net_income'] / financial_data['revenue']) * 100
         analysis.append("\n### Profitability Analysis")
         analysis.append(f"- **Profit Margin**: {profit_margin:.2f}% {'(Excellent)' if profit_margin > 20 else '(Good)' if profit_margin > 10 else '(Marginal)'}")
-    
-    # Efficiency Analysis
-    if 'total_assets' in financial_data and 'revenue' in financial_data:
-        asset_turnover = financial_data['revenue'] / financial_data['total_assets']
-        analysis.append("\n### Efficiency Analysis")
-        analysis.append(f"- **Asset Turnover**: {asset_turnover:.2f} {'(High)' if asset_turnover > 1 else '(Moderate)' if asset_turnover > 0.5 else '(Low)'}")
     
     return "\n".join(analysis)
 
@@ -315,19 +286,10 @@ def visualize_financials(financial_data):
         ax2.set_ylabel('Amount ($)')
         figs.append(fig2)
     
-    # Profitability Visualization
-    if 'revenue' in financial_data and 'net_income' in financial_data:
-        fig3, ax3 = plt.subplots(figsize=(8, 4))
-        profit_margin = (financial_data['net_income'] / financial_data['revenue']) * 100
-        ax3.bar(['Profit Margin'], [profit_margin], color=['#1f77b4'])
-        ax3.set_title(f'Profit Margin: {profit_margin:.2f}%')
-        ax3.set_ylabel('Percentage (%)')
-        ax3.set_ylim(0, 100)
-        figs.append(fig3)
-    
     return figs
 
 def main():
+    st.set_page_config(page_title="SEC Filing Analyzer", layout="wide")
     st.title("🔍 SEC Filing Analyzer Pro")
     
     # Initialize session state
@@ -335,6 +297,8 @@ def main():
         st.session_state.selected_filing = None
     if 'analysis_done' not in st.session_state:
         st.session_state.analysis_done = False
+    if 'filings' not in st.session_state:
+        st.session_state.filings = None
 
     # Sidebar for navigation
     st.sidebar.header("Navigation")
@@ -362,43 +326,32 @@ def main():
                 
             with st.spinner("Fetching SEC filings..."):
                 filings = get_company_filings(cik, report_type, start_date, end_date)
+                st.session_state.filings = filings
+                st.session_state.selected_filing = None
+                st.session_state.analysis_done = False
                 
                 if filings:
                     st.success(f"Found {len(filings)} {report_type} filings")
-                    
-                    # Display filings in an interactive table
-                    df = pd.DataFrame(filings)
-                    df['Filing Date'] = pd.to_datetime(df['filingDate']).dt.date
-                    
-                    # Create proper URLs
-                    df['URL'] = df.apply(
-                        lambda row: get_full_filing_url(cik, row['accessionNumber'], row['primaryDocument']), 
-                        axis=1
-                    )
-                    
-                    # Display selectable table
-                    st.dataframe(
-                        df[['form', 'Filing Date', 'reportDate', 'primaryDocDescription']],
-                        hide_index=True,
-                        use_container_width=True
-                    )
-                    
-                    # Store filings in session state
-                    st.session_state.filings = df.to_dict('records')
-                    
-                    # Let user select a filing to analyze
-                    selected_index = st.selectbox(
-                        "Select a filing to analyze",
-                        range(len(filings)),
-                        format_func=lambda x: f"{filings[x]['form']} - {filings[x]['filingDate']} - {filings[x].get('primaryDocDescription', '')}"
-                    )
-                    
-                    # Store selected filing in session state
-                    st.session_state.selected_filing = filings[selected_index]
-                    st.session_state.analysis_done = False
+                else:
+                    st.warning(f"No {report_type} filings found for CIK {cik} between {start_date} and {end_date}")
 
-        # Analysis section (only shown when a filing is selected)
-        if st.session_state.selected_filing and not st.session_state.analysis_done:
+        if st.session_state.filings:
+            st.subheader("Available Filings")
+            
+            # Display filings in a table
+            df = pd.DataFrame(st.session_state.filings)
+            df['Filing Date'] = pd.to_datetime(df['filingDate']).dt.date
+            
+            # Create a selection box
+            selected_index = st.selectbox(
+                "Select a filing to analyze",
+                range(len(st.session_state.filings)),
+                format_func=lambda x: f"{st.session_state.filings[x]['form']} - {st.session_state.filings[x]['filingDate']} - {st.session_state.filings[x].get('primaryDocDescription', '')}"
+            )
+            
+            # Store selected filing
+            st.session_state.selected_filing = st.session_state.filings[selected_index]
+            
             if st.button("Analyze Selected Filing"):
                 with st.spinner("Analyzing filing..."):
                     selected_filing = st.session_state.selected_filing
@@ -422,11 +375,10 @@ def main():
                         st.session_state.analysis_done = True
                     else:
                         st.error("Could not extract financial data from this filing")
-                        st.session_state.analysis_done = False
     
     elif analysis_type == "Direct Filing Analysis":
         st.header("📑 Direct Filing Analysis")
-        filing_url = st.text_input("Enter SEC Filing URL", "")
+        filing_url = st.text_input("Enter SEC Filing URL", "https://www.sec.gov/ix?doc=/Archives/edgar/data/0000790652/000121390024098306/ea0220916-10q_imaging.htm")
         
         if st.button("Analyze Filing") and filing_url:
             with st.spinner("Analyzing filing..."):
@@ -446,3 +398,6 @@ def main():
                         st.pyplot(fig)
                 else:
                     st.error("Could not extract financial data from this filing")
+
+if __name__ == "__main__":
+    main()
