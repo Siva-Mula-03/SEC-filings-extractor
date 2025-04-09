@@ -1,5 +1,4 @@
 import streamlit as st
-st.set_page_config(page_title="SEC Filing Analyzer Pro", layout="wide", page_icon="📈")
 import requests
 import pandas as pd
 from bs4 import BeautifulSoup
@@ -513,7 +512,7 @@ def display_chat_message(role, content):
                    unsafe_allow_html=True)
 
 def main():
-   
+    st.set_page_config(page_title="SEC Filing Analyzer Pro", layout="wide", page_icon="📈")
     
     # Main app header
     st.title("📈 SEC Filing Analyzer Pro")
