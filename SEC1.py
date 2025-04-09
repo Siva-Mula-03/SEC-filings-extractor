@@ -257,6 +257,16 @@ def analyze_and_visualize(financial_data):
     
     return "\n".join(analysis), figs
 
+def find_table_by_header(soup, header_text):
+    """Find a table that has the given header text"""
+    headers = soup.find_all(string=re.compile(header_text, re.IGNORECASE))
+    for header in headers:
+        parent = header.find_parent()
+        while parent:
+            if parent.name == 'table':
+                return parent
+            parent = parent.find_parent()
+    return None
 # --------------------------
 # Chat Interface
 # --------------------------
