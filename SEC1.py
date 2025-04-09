@@ -30,46 +30,31 @@ def normalize_cik(cik):
         return None
 
 def get_company_filings(cik, form_type, start_date, end_date):
-    """Fetch SEC filings with proper error handling"""
     try:
-        normalized_cik = normalize_cik(cik)
-        if not normalized_cik:
-            return None
-            
-        url = f"{SEC_API}/CIK{normalized_cik}.json"
-        response = requests.get(url, headers=HEADERS, timeout=10)
+        # Remove leading zeros for API call
+        api_cik = str(int(cik))  
+        url = f"{SEC_API}/CIK{api_cik}.json"
         
-        if response.status_code == 403:
-            st.error("Access denied. Please wait and try again later.")
-            return None
-            
-        response.raise_for_status()
+        response = requests.get(url, headers=HEADERS)
         filings_data = response.json()
         
         filings = []
-        for filing in filings_data.get('filings', {}).get('recent', []):
-            try:
-                filing_date = datetime.strptime(filing['filingDate'], '%Y-%m-%d').date()
-                if (filing['form'].upper() == form_type.upper() and 
-                    start_date <= filing_date <= end_date):
-                    filings.append({
-                        'form': filing['form'],
-                        'filingDate': filing_date,
-                        'accessionNumber': filing['accessionNumber'].replace('-', ''),
-                        'primaryDoc': filing['primaryDocument']
-                    })
-            except:
-                continue
+        for filing in filings_data['filings']['recent']:
+            # Convert string dates properly
+            filing_date = datetime.strptime(filing['filingDate'], '%Y-%m-%d').date()
+            
+            # Check both form type AND date range
+            if (filing['form'].upper() == form_type.upper() and 
+                filing_date >= start_date and 
+                filing_date <= end_date):
+                filings.append(filing)
         
         return filings
-    
-    except requests.exceptions.RequestException as e:
-        st.error(f"Network error: {str(e)}")
-        return None
-    except Exception as e:
-        st.error(f"Unexpected error: {str(e)}")
-        return None
 
+    except Exception as e:
+        st.error(f"Error: {str(e)}")
+        return []
+        
 def get_filing_url(cik, accession_number, document):
     """Construct proper SEC filing URL"""
     return f"{BASE_URL}/Archives/edgar/data/{cik.zfill(10)}/{accession_number}/{document}"
