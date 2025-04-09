@@ -316,58 +316,6 @@ def parse_numeric_value(text):
     except ValueError:
         return None
 
-def extract_financial_data(filing_url):
-    """Extract financial data from filing document with better error handling"""
-    try:
-        # First try to get the actual document URL from the index page
-        if '/ix?doc=' in filing_url:
-            response = requests.get(filing_url, headers=HEADERS, timeout=15)
-            response.raise_for_status()
-            soup = BeautifulSoup(response.content, 'html.parser')
-            iframe = soup.find('iframe', {'id': 'edgar-iframe'})
-            if iframe and iframe.get('src'):
-                filing_url = urljoin(BASE_URL, iframe.get('src'))
-        
-        response = requests.get(filing_url, headers=HEADERS, timeout=15)
-        response.raise_for_status()
-        
-        content = response.content
-        
-        # Try XBRL first
-        xbrl_data = parse_xbrl_filing(content)
-        if xbrl_data and any(xbrl_data.values()):
-            return xbrl_data
-            
-        # Fall back to HTML parsing with improved table detection
-        html_data = parse_html_filing(content)
-        if html_data and any(html_data.values()):
-            return html_data
-            
-        # If we still haven't found data, try to find financial statements links
-        soup = BeautifulSoup(content, 'html.parser')
-        financial_links = []
-        for link in soup.find_all('a', href=True):
-            if any(term in link.text.lower() for term in ['financial', 'statement', 'balance sheet', 'income']):
-                financial_links.append(urljoin(filing_url, link['href']))
-        
-        # Try each financial statement link
-        for link in financial_links[:3]:  # Limit to first 3 links
-            try:
-                stmt_response = requests.get(link, headers=HEADERS, timeout=10)
-                stmt_response.raise_for_status()
-                stmt_data = parse_html_filing(stmt_response.content)
-                if stmt_data and any(stmt_data.values()):
-                    return stmt_data
-            except:
-                continue
-                
-        st.warning("Could not automatically extract financial data from this filing. Please check the filing manually.")
-        return None
-        
-    except Exception as e:
-        st.error(f"Error processing filing: {str(e)}")
-        return None
-
 def analyze_financials(financial_data, filing_info):
     """Generate financial analysis with robust error handling"""
     if not financial_data:
