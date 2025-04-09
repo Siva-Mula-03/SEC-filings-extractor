@@ -1,19 +1,11 @@
-# Configuration must be at the very top
 import streamlit as st
-st.set_page_config(
-    page_title="SEC Filing Analyzer Pro", 
-    layout="wide", 
-    page_icon="📈",
-    initial_sidebar_state="expanded"
-)
-
 import requests
 import pandas as pd
 from bs4 import BeautifulSoup
 import re
 from datetime import datetime
 import xml.etree.ElementTree as ET
-import plotly.express as px
+import matplotlib.pyplot as plt
 from urllib.parse import urljoin
 
 # Configuration
@@ -25,106 +17,14 @@ HEADERS = {
     'Accept': 'application/json'
 }
 
-# Initialize session state
-if 'chat_history' not in st.session_state:
-    st.session_state.chat_history = []
-if 'selected_filing' not in st.session_state:
-    st.session_state.selected_filing = None
-if 'financial_data' not in st.session_state:
-    st.session_state.financial_data = None
-if 'analysis_done' not in st.session_state:
-    st.session_state.analysis_done = False
-
-# Dark mode CSS
-st.markdown("""
-<style>
-:root {
-    --primary-color: #1F1F1F;
-    --secondary-color: #2D2D2D;
-    --text-color: #FFFFFF;
-    --accent-color: #00FF88;
-}
-
-/* Main content styling */
-.stApp {
-    background-color: var(--primary-color);
-    color: var(--text-color);
-}
-
-/* Sidebar styling */
-[data-testid="stSidebar"] {
-    background-color: var(--secondary-color) !important;
-    border-right: 1px solid #3D3D3D;
-}
-
-/* Chat interface styling */
-.chat-message {
-    padding: 12px;
-    border-radius: 8px;
-    margin: 8px 0;
-    max-width: 80%;
-    background-color: #2D2D2D;
-    color: var(--text-color);
-}
-
-.user-message {
-    margin-left: 20%;
-    border: 1px solid #3D3D3D;
-}
-
-.bot-message {
-    margin-right: 20%;
-    background-color: #1A1A1A;
-}
-
-/* Input fields */
-.stTextInput>div>div>input {
-    background-color: #2D2D2D;
-    color: var(--text-color);
-    border: 1px solid #3D3D3D;
-}
-
-/* Buttons */
-.stButton>button {
-    background-color: var(--accent-color);
-    color: #1F1F1F;
-    border: none;
-    font-weight: bold;
-}
-
-.stButton>button:hover {
-    background-color: #00CC6A !important;
-}
-
-/* Cards */
-.card {
-    background: var(--secondary-color);
-    border-radius: 8px;
-    padding: 1.5rem;
-    margin-bottom: 1rem;
-    border: 1px solid #3D3D3D;
-}
-
-/* Plotly chart styling */
-.js-plotly-plot .plotly, .js-plotly-plot .plotly div {
-    background-color: var(--secondary-color) !important;
-}
-</style>
-""", unsafe_allow_html=True)
-
-# --------------------------
-# Core Application Functions
-# --------------------------
-
 def normalize_cik(cik):
-    """Convert CIK to 10-digit format"""
+    """Convert CIK to proper format (10 digits with leading zeros)"""
     try:
         return str(int(cik.strip())).zfill(10)
     except:
         return None
 
 def get_company_filings(cik, form_type, start_date, end_date):
-    """Retrieve SEC filings for a company"""
     try:
         normalized_cik = normalize_cik(cik)
         if not normalized_cik:
@@ -132,15 +32,17 @@ def get_company_filings(cik, form_type, start_date, end_date):
             return None
             
         url = f"{SEC_API}/CIK{normalized_cik}.json"
+        
         response = requests.get(url, headers=HEADERS, timeout=15)
         
         if response.status_code != 200:
-            st.error(f"SEC API Error: {response.status_code}")
+            st.error(f"SEC API Error: {response.status_code} - {response.text}")
             return None
             
         filings_data = response.json()
         filings = []
         
+        # Process recent filings
         recent_filings = filings_data.get('filings', {}).get('recent', {})
         if recent_filings:
             for i in range(len(recent_filings.get('accessionNumber', []))):
@@ -151,46 +53,199 @@ def get_company_filings(cik, form_type, start_date, end_date):
                         filings.append({
                             'form': recent_filings['form'][i],
                             'filingDate': filing_date,
+                            'reportDate': recent_filings.get('reportDate', [None]*len(recent_filings['form']))[i],
                             'accessionNumber': recent_filings['accessionNumber'][i],
                             'primaryDocument': recent_filings['primaryDocument'][i],
+                            'primaryDocDescription': recent_filings.get('primaryDocDescription', [None]*len(recent_filings['form']))[i]
                         })
                 except:
                     continue
         
-        return sorted(filings, key=lambda x: x['filingDate'], reverse=True)
+        # Sort by filing date (newest first)
+        filings.sort(key=lambda x: x['filingDate'], reverse=True)
+        return filings
         
     except Exception as e:
         st.error(f"Error fetching filings: {str(e)}")
         return None
 
+def get_full_filing_url(cik, accession_number, primary_doc):
+    """Construct proper SEC filing URL with correct path"""
+    accession_no_clean = accession_number.replace("-", "")
+    return f"{BASE_URL}/Archives/edgar/data/{cik}/{accession_no_clean}/{primary_doc}"
+
 def extract_financial_data(filing_url):
-    """Extract financial data from filing documents"""
+    """Extract financial data from filing document"""
     try:
+        # First try to get the actual document URL from the index page
         if '/ix?doc=' in filing_url:
             response = requests.get(filing_url, headers=HEADERS, timeout=15)
+            response.raise_for_status()
             soup = BeautifulSoup(response.content, 'html.parser')
             iframe = soup.find('iframe', {'id': 'edgar-iframe'})
             if iframe and iframe.get('src'):
                 filing_url = urljoin(BASE_URL, iframe.get('src'))
         
         response = requests.get(filing_url, headers=HEADERS, timeout=15)
+        response.raise_for_status()
+        
+        content = response.content
+        
+        # Try XBRL first
+        xbrl_data = parse_xbrl_filing(content)
+        if xbrl_data:
+            return xbrl_data
+            
+        # Fall back to HTML parsing
+        html_data = parse_html_filing(content)
+        if html_data:
+            return html_data
+            
+        return None
+        
+    except Exception as e:
+        st.error(f"Error extracting financial data: {str(e)}")
+        return None
+
+def parse_xbrl_filing(content):
+    """Parse XBRL/XML financial data"""
+    try:
+        root = ET.fromstring(content)
+        ns = {
+            'xbrli': 'http://www.xbrl.org/2003/instance',
+            'us-gaap': 'http://fasb.org/us-gaap/2023-01-31',
+            'dei': 'http://xbrl.sec.gov/dei/2023-01-31'
+        }
+        
+        data = {}
+        concepts = {
+            'Assets': 'total_assets',
+            'AssetsCurrent': 'current_assets',
+            'Liabilities': 'total_liabilities',
+            'LiabilitiesCurrent': 'current_liabilities',
+            'StockholdersEquity': 'shareholders_equity',
+            'RevenueFromContractWithCustomer': 'revenue',
+            'NetIncomeLoss': 'net_income',
+            'EarningsPerShareBasic': 'eps_basic',
+            'EarningsPerShareDiluted': 'eps_diluted',
+            'OperatingIncomeLoss': 'operating_income',
+            'CashAndCashEquivalentsAtCarryingValue': 'cash'
+        }
+        
+        for concept, key in concepts.items():
+            elem = root.find(f'.//us-gaap:{concept}', ns)
+            if elem is not None and elem.text:
+                try:
+                    # Handle scale factors (e.g., units="USD" scale="6" means millions)
+                    scale = int(elem.get('scale', '0'))
+                    value = float(elem.text.replace(',', '')) * (10 ** scale)
+                    data[key] = value
+                except ValueError:
+                    continue
+        
+        # Get reporting period
+        period = root.find('.//dei:DocumentPeriodEndDate', ns)
+        if period is not None and period.text:
+            data['reporting_period'] = period.text
+            
+        return data if data else None
+        
+    except ET.ParseError:
+        return None
+    except Exception as e:
+        st.error(f"XBRL parsing error: {str(e)}")
+        return None
+
+def parse_html_filing(content):
+    """Parse HTML financial statements with improved table detection"""
+    try:
+        soup = BeautifulSoup(content, 'html.parser')
+        
+        # Remove unwanted elements
+        for element in soup(['script', 'style', 'meta', 'link', 'nav', 'header', 'footer']):
+            element.decompose()
+        
+        financial_data = {}
+        
+        # Try to find consolidated financial statements
+        consolidated_text = soup.find_all(string=re.compile(r'consolidated', re.IGNORECASE))
+        if consolidated_text:
+            parent = consolidated_text[0].find_parent()
+            tables = parent.find_all_next('table', limit=5)
+        else:
+            tables = soup.find_all('table')
+        
+        for table in tables:
+            rows = table.find_all('tr')
+            for row in rows:
+                cells = row.find_all(['td', 'th'])
+                if len(cells) >= 2:
+                    label = cells[0].get_text(strip=True).lower()
+                    value = cells[-1].get_text(strip=True)
+                    
+                    # Improved financial term detection
+                    if 'total assets' in label:
+                        financial_data['total_assets'] = parse_numeric_value(value)
+                    elif 'current assets' in label:
+                        financial_data['current_assets'] = parse_numeric_value(value)
+                    elif 'total liabilities' in label:
+                        financial_data['total_liabilities'] = parse_numeric_value(value)
+                    elif 'current liabilities' in label:
+                        financial_data['current_liabilities'] = parse_numeric_value(value)
+                    elif 'total revenue' in label or 'sales' in label:
+                        financial_data['revenue'] = parse_numeric_value(value)
+                    elif 'net income' in label or 'net profit' in label:
+                        financial_data['net_income'] = parse_numeric_value(value)
+                    elif 'operating income' in label:
+                        financial_data['operating_income'] = parse_numeric_value(value)
+                    elif 'cash and cash equivalents' in label:
+                        financial_data['cash'] = parse_numeric_value(value)
+        
+        return financial_data if financial_data else None
+        
+    except Exception as e:
+        st.error(f"HTML parsing error: {str(e)}")
+        return None
+
+def extract_financial_data(filing_url):
+    """Enhanced financial data extraction with multiple fallback methods"""
+    try:
+        # First get the actual document content
+        if '/ix?doc=' in filing_url:
+            response = requests.get(filing_url, headers=HEADERS, timeout=15)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.content, 'html.parser')
+            iframe = soup.find('iframe', {'id': 'edgar-iframe'})
+            if iframe and iframe.get('src'):
+                filing_url = urljoin(BASE_URL, iframe.get('src'))
+        
+        response = requests.get(filing_url, headers=HEADERS, timeout=15)
+        response.raise_for_status()
         content = response.text
         
-        # XBRL extraction logic
+        # Method 1: Try to find direct XBRL data
         xbrl_url = filing_url.replace('.htm', '.xml').replace('.html', '.xml')
         xbrl_response = requests.get(xbrl_url, headers=HEADERS, timeout=10)
         if xbrl_response.status_code == 200:
-            return parse_xbrl_filing(xbrl_response.content)
+            xbrl_data = parse_xbrl_filing(xbrl_response.content)
+            if xbrl_data:
+                return xbrl_data
         
-        # HTML fallback extraction
+        # Method 2: Improved HTML table parsing
         soup = BeautifulSoup(content, 'html.parser')
+        
+        # Remove unwanted elements
+        for element in soup(['script', 'style', 'meta', 'link', 'nav', 'header', 'footer']):
+            element.decompose()
+        
         financial_data = {}
         
-        # Table parsing logic
+        # Look for specific tables by common patterns
         table_patterns = [
-            ('balance sheet', ['total assets', 'current assets', 'total liabilities']),
-            ('income statement', ['revenue', 'net income']),
-            ('cash flow', ['cash and cash equivalents'])
+            ('consolidated balance sheet', ['total assets', 'current assets', 
+                                          'total liabilities', 'current liabilities']),
+            ('consolidated statement of operations', ['revenue', 'net income']),
+            ('consolidated statement of cash flows', ['cash and cash equivalents'])
         ]
         
         for pattern, fields in table_patterns:
@@ -202,60 +257,37 @@ def extract_financial_data(filing_url):
                         for field in fields:
                             if field in cells[i]:
                                 value = parse_numeric_value(cells[i+1])
-                                if value: financial_data[field.replace(' ', '_')] = value
+                                if value is not None:
+                                    financial_data[field.replace(' ', '_')] = value
         
-        return financial_data or None
+        # Method 3: Search for specific financial terms
+        if not financial_data:
+            term_mapping = {
+                'total assets': 'total_assets',
+                'current assets': 'current_assets',
+                'total liabilities': 'total_liabilities',
+                'current liabilities': 'current_liabilities',
+                'revenue': 'revenue',
+                'net income': 'net_income',
+                'cash and cash equivalents': 'cash'
+            }
+            
+            for term, key in term_mapping.items():
+                elements = soup.find_all(string=re.compile(term, re.IGNORECASE))
+                for element in elements:
+                    parent = element.find_parent()
+                    if parent:
+                        siblings = parent.find_next_siblings()
+                        for sibling in siblings[:3]:  # Check next 3 siblings
+                            value = parse_numeric_value(sibling.get_text(strip=True))
+                            if value is not None and key not in financial_data:
+                                financial_data[key] = value
+        
+        return financial_data if financial_data else None
         
     except Exception as e:
         st.error(f"Error processing filing: {str(e)}")
         return None
-
-# --------------------------
-# Visualization & Analysis
-# --------------------------
-
-def analyze_and_visualize(financial_data):
-    """Generate analysis and visualizations"""
-    analysis = []
-    figs = []
-    
-    if not financial_data:
-        return "No financial data available", []
-    
-    # Balance Sheet Analysis
-    if all(k in financial_data for k in ['total_assets', 'total_liabilities']):
-        equity = financial_data['total_assets'] - financial_data['total_liabilities']
-        analysis.append("## 📊 Balance Sheet")
-        analysis.append(f"- **Total Assets**: ${financial_data['total_assets']:,.2f}")
-        analysis.append(f"- **Total Liabilities**: ${financial_data['total_liabilities']:,.2f}")
-        analysis.append(f"- **Shareholders' Equity**: ${equity:,.2f}")
-        
-        fig = px.bar(
-            x=['Assets', 'Liabilities', 'Equity'],
-            y=[financial_data['total_assets'], financial_data['total_liabilities'], equity],
-            labels={'x': 'Category', 'y': 'Amount'},
-            color=['Assets', 'Liabilities', 'Equity'],
-            template='plotly_dark'
-        )
-        figs.append(fig)
-    
-    # Income Statement Analysis
-    if all(k in financial_data for k in ['revenue', 'net_income']):
-        margin = (financial_data['net_income'] / financial_data['revenue']) * 100
-        analysis.append("\n## 💰 Income Statement")
-        analysis.append(f"- **Revenue**: ${financial_data['revenue']:,.2f}")
-        analysis.append(f"- **Net Income**: ${financial_data['net_income']:,.2f}")
-        analysis.append(f"- **Profit Margin**: {margin:.2f}%")
-        
-        fig = px.pie(
-            names=['Profit', 'Expenses'],
-            values=[financial_data['net_income'], financial_data['revenue'] - financial_data['net_income']],
-            hole=0.5,
-            template='plotly_dark'
-        )
-        figs.append(fig)
-    
-    return "\n".join(analysis), figs
 
 def find_table_by_header(soup, header_text):
     """Find a table that has the given header text"""
@@ -267,114 +299,236 @@ def find_table_by_header(soup, header_text):
                 return parent
             parent = parent.find_parent()
     return None
-# --------------------------
-# Chat Interface
-# --------------------------
 
-def handle_chat_query(query, financial_data):
-    """Process user queries about financial data"""
-    query = query.lower()
+def parse_numeric_value(text):
+    """More robust numeric value parsing"""
+    if not text:
+        return None
     
+    # Handle accounting format (parentheses for negatives)
+    text = text.strip().replace('(', '-').replace(')', '')
+    
+    # Remove non-numeric characters except decimal point and minus sign
+    cleaned = re.sub(r'[^\d.-]', '', text)
+    
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
+def analyze_financials(financial_data, filing_info):
+    """Generate financial analysis with robust error handling"""
     if not financial_data:
-        return "Please analyze a filing first"
+        return "⚠️ No financial data available for analysis"
     
-    response = []
+    # Validate and clean the financial data
+    cleaned_data = {}
+    for key, value in financial_data.items():
+        if value is not None:
+            # Convert to absolute value for certain metrics
+            if key in ['cash', 'current_assets', 'total_assets']:
+                cleaned_data[key] = abs(float(value))
+            else:
+                cleaned_data[key] = float(value)
     
-    # Balance Sheet Questions
-    if any(word in query for word in ['asset', 'liability', 'equity']):
-        response.append("### Balance Sheet Insights")
-        if 'total_assets' in financial_data:
-            response.append(f"- Total Assets: ${financial_data['total_assets']:,.2f}")
-            response.append(f"- Total Liabilities: ${financial_data['total_liabilities']:,.2f}")
-            response.append(f"- Equity: ${financial_data['total_assets'] - financial_data['total_liabilities']:,.2f}")
+    analysis = []
+    analysis.append("### Key Financial Metrics")
     
-    # Income Questions
-    if any(word in query for word in ['revenue', 'income', 'profit']):
-        response.append("\n### Income Insights")
-        if 'revenue' in financial_data:
-            response.append(f"- Revenue: ${financial_data['revenue']:,.2f}")
-        if 'net_income' in financial_data:
-            response.append(f"- Net Income: ${financial_data['net_income']:,.2f}")
+    try:
+        # Basic metrics with validation
+        if 'revenue' in cleaned_data and cleaned_data['revenue'] > 0:
+            analysis.append(f"- **Revenue**: ${cleaned_data['revenue']:,.2f}")
+        
+        if 'net_income' in cleaned_data:
+            analysis.append(f"- **Net Income**: ${cleaned_data['net_income']:,.2f}")
+        
+        if 'operating_income' in cleaned_data:
+            analysis.append(f"- **Operating Income**: ${cleaned_data['operating_income']:,.2f}")
+        
+        # Balance Sheet Analysis with validation
+        if ('total_assets' in cleaned_data and 
+            'total_liabilities' in cleaned_data and
+            cleaned_data['total_assets'] > 0):
+            
+            if cleaned_data['total_liabilities'] > cleaned_data['total_assets']:
+                analysis.append("\n⚠️ Warning: Liabilities exceed total assets - data may need verification")
+            
+            equity = cleaned_data['total_assets'] - cleaned_data['total_liabilities']
+            analysis.append("\n### Balance Sheet Analysis")
+            analysis.append(f"- **Total Assets**: ${cleaned_data['total_assets']:,.2f}")
+            analysis.append(f"- **Total Liabilities**: ${cleaned_data['total_liabilities']:,.2f}")
+            analysis.append(f"- **Shareholders' Equity**: ${equity:,.2f}")
+            
+            if equity > 0:  # Only calculate ratio if equity is positive
+                debt_to_equity = cleaned_data['total_liabilities'] / equity
+                analysis.append(f"- **Debt-to-Equity Ratio**: {debt_to_equity:.2f}")
+        
+        # Liquidity Analysis with validation
+        if ('current_assets' in cleaned_data and 
+            'current_liabilities' in cleaned_data and
+            cleaned_data['current_liabilities'] > 0):
+            
+            current_ratio = cleaned_data['current_assets'] / cleaned_data['current_liabilities']
+            analysis.append("\n### Liquidity Analysis")
+            analysis.append(f"- **Current Ratio**: {current_ratio:.2f}")
+            
+            if 'cash' in cleaned_data:
+                quick_ratio = cleaned_data['cash'] / cleaned_data['current_liabilities']
+                analysis.append(f"- **Quick Ratio**: {quick_ratio:.2f}")
+        
+        # Profitability Analysis with validation
+        if ('revenue' in cleaned_data and 
+            'net_income' in cleaned_data and
+            cleaned_data['revenue'] > 0):
+            
+            profit_margin = (cleaned_data['net_income'] / cleaned_data['revenue']) * 100
+            analysis.append("\n### Profitability Analysis")
+            analysis.append(f"- **Profit Margin**: {profit_margin:.2f}%")
+        
+        if len(analysis) == 1:  # Only has the header
+            return "⚠️ Found financial data but couldn't generate meaningful analysis"
+        
+        return "\n".join(analysis)
     
-    return "\n".join(response) if response else "I can answer questions about assets, liabilities, revenue, and profits"
-
-# --------------------------
-# Main Application
-# --------------------------
+    except Exception as e:
+        return f"⚠️ Error in analysis: Some calculated values may be invalid. Original data: {cleaned_data}"
+def visualize_financials(financial_data):
+    """Create visualizations of financial data"""
+    figs = []
+    
+    # Balance Sheet Visualization
+    if 'total_assets' in financial_data and 'total_liabilities' in financial_data:
+        fig1, ax1 = plt.subplots(figsize=(8, 4))
+        equity = financial_data['total_assets'] - financial_data['total_liabilities']
+        ax1.barh(['Assets', 'Liabilities', 'Equity'], 
+                [financial_data['total_assets'], financial_data['total_liabilities'], equity],
+                color=['#1f77b4', '#ff7f0e', '#2ca02c'])
+        ax1.set_title('Balance Sheet Composition')
+        ax1.set_xlabel('Amount ($)')
+        figs.append(fig1)
+    
+    # Income Statement Visualization
+    if all(k in financial_data for k in ['revenue', 'operating_income', 'net_income']):
+        fig2, ax2 = plt.subplots(figsize=(8, 4))
+        ax2.bar(['Revenue', 'Operating Income', 'Net Income'],
+               [financial_data['revenue'], financial_data['operating_income'], financial_data['net_income']],
+               color=['#1f77b4', '#ff7f0e', '#2ca02c'])
+        ax2.set_title('Income Statement')
+        ax2.set_ylabel('Amount ($)')
+        figs.append(fig2)
+    
+    return figs
 
 def main():
-    st.title("📈 SEC Filing Analyzer Pro")
+    st.set_page_config(page_title="SEC Filing Analyzer", layout="wide")
+    st.title("🔍 SEC Filing Analyzer Pro")
     
-    # Sidebar Controls
-    with st.sidebar:
-        st.header("Analysis Controls")
-        analysis_type = st.radio("Select Analysis Type", ["Company Search", "Direct Filing"])
-        
-        if analysis_type == "Company Search":
-            cik = st.text_input("Enter CIK Number", "790652")
-            report_type = st.selectbox("Report Type", ["10-Q", "10-K", "8-K"])
-            start_date = st.date_input("Start Date", value=datetime(2022, 1, 1))
-            end_date = st.date_input("End Date", value=datetime.today())
-            
-            if st.button("Search Filings"):
-                with st.spinner("Fetching filings..."):
-                    filings = get_company_filings(cik, report_type, start_date, end_date)
-                    st.session_state.filings = filings
-                    st.session_state.analysis_done = False
-                    st.session_state.financial_data = None
-                    st.session_state.selected_filing = None
-        
-        elif analysis_type == "Direct Filing":
-            filing_url = st.text_input("Filing URL", value="https://www.sec.gov/ix?doc=/Archives/edgar/data/0000790652/000121390024098306/ea0220916-10q_imaging.htm")
-            
-            if st.button("Analyze Filing"):
-                with st.spinner("Processing filing..."):
-                    financial_data = extract_financial_data(filing_url)
-                    st.session_state.financial_data = financial_data
-                    st.session_state.analysis_done = True
-                    st.session_state.selected_filing = {'form': 'Direct URL', 'filingDate': '', 'accessionNumber': '', 'primaryDocument': ''}
-    
-    # Display filings if searched
-    if analysis_type == "Company Search" and 'filings' in st.session_state and st.session_state.filings:
-        st.subheader("Available Filings")
-        for i, filing in enumerate(st.session_state.filings):
-            col1, col2 = st.columns([4, 1])
-            with col1:
-                st.markdown(f"**{filing['form']}** - {filing['filingDate']} - Accession #: `{filing['accessionNumber']}`")
-            with col2:
-                if st.button("Analyze", key=f"analyze_{i}"):
-                    accession = filing['accessionNumber'].replace("-", "")
-                    cik = normalize_cik(cik)
-                    filing_url = f"{BASE_URL}/Archives/edgar/data/{cik}/{accession}/{filing['primaryDocument']}"
-                    with st.spinner("Processing filing..."):
-                        financial_data = extract_financial_data(filing_url)
-                        st.session_state.financial_data = financial_data
-                        st.session_state.analysis_done = True
-                        st.session_state.selected_filing = filing
+    # Initialize session state
+    if 'selected_filing' not in st.session_state:
+        st.session_state.selected_filing = None
+    if 'analysis_done' not in st.session_state:
+        st.session_state.analysis_done = False
+    if 'filings' not in st.session_state:
+        st.session_state.filings = None
 
-    # Display analysis results
-    if st.session_state.analysis_done and st.session_state.financial_data:
-        st.subheader("📊 Financial Analysis")
-        analysis_text, charts = analyze_and_visualize(st.session_state.financial_data)
-        st.markdown(analysis_text)
-        for fig in charts:
-            st.plotly_chart(fig, use_container_width=True)
+    # Sidebar for navigation
+    st.sidebar.header("Navigation")
+    analysis_type = st.sidebar.radio("Select Analysis Type", ["Company Filings", "Direct Filing Analysis"])
     
-    # Chat Interface
-    if st.session_state.analysis_done and st.session_state.financial_data:
-        st.subheader("💬 Ask Questions About the Filing")
-        user_input = st.text_input("Your question", key="chat_input")
-        if st.button("Ask"):
-            if user_input:
-                response = handle_chat_query(user_input, st.session_state.financial_data)
-                st.session_state.chat_history.append(("user", user_input))
-                st.session_state.chat_history.append(("bot", response))
+    if analysis_type == "Company Filings":
+        st.header("📄 Company Filings Search")
         
-        # Display chat history
-        for sender, message in st.session_state.chat_history:
-            css_class = "user-message" if sender == "user" else "bot-message"
-            st.markdown(f'<div class="chat-message {css_class}">{message}</div>', unsafe_allow_html=True)
+        col1, col2 = st.columns(2)
+        with col1:
+            cik = st.text_input("Enter Company CIK", "790652")  # ZoomInfo Technologies
+        with col2:
+            report_type = st.selectbox("Select Report Type", ["10-Q", "10-K", "8-K", "DEF 14A"])
+        
+        col3, col4 = st.columns(2)
+        with col3:
+            start_date = st.date_input("Start Date", value=datetime(2022, 10, 1))
+        with col4:
+            end_date = st.date_input("End Date", value=datetime.today())
+        
+        if st.button("Search Filings"):
+            if not cik or not cik.strip().isdigit():
+                st.error("Please enter a valid CIK number")
+                return
+                
+            with st.spinner("Fetching SEC filings..."):
+                filings = get_company_filings(cik, report_type, start_date, end_date)
+                st.session_state.filings = filings
+                st.session_state.selected_filing = None
+                st.session_state.analysis_done = False
+                
+                if filings:
+                    st.success(f"Found {len(filings)} {report_type} filings")
+                else:
+                    st.warning(f"No {report_type} filings found for CIK {cik} between {start_date} and {end_date}")
+
+        if st.session_state.filings:
+            st.subheader("Available Filings")
+            
+            # Display filings in a table
+            df = pd.DataFrame(st.session_state.filings)
+            df['Filing Date'] = pd.to_datetime(df['filingDate']).dt.date
+            
+            # Create a selection box
+            selected_index = st.selectbox(
+                "Select a filing to analyze",
+                range(len(st.session_state.filings)),
+                format_func=lambda x: f"{st.session_state.filings[x]['form']} - {st.session_state.filings[x]['filingDate']} - {st.session_state.filings[x].get('primaryDocDescription', '')}"
+            )
+            
+            # Store selected filing
+            st.session_state.selected_filing = st.session_state.filings[selected_index]
+            
+            if st.button("Analyze Selected Filing"):
+                with st.spinner("Analyzing filing..."):
+                    selected_filing = st.session_state.selected_filing
+                    filing_url = get_full_filing_url(cik, selected_filing['accessionNumber'], selected_filing['primaryDocument'])
+                    
+                    financial_data = extract_financial_data(filing_url)
+                    
+                    if financial_data:
+                        st.subheader("Financial Data")
+                        st.json(financial_data)
+                        
+                        st.subheader("Financial Analysis")
+                        analysis = analyze_financials(financial_data, selected_filing)
+                        st.markdown(analysis)
+                        
+                        st.subheader("Visualizations")
+                        figs = visualize_financials(financial_data)
+                        for fig in figs:
+                            st.pyplot(fig)
+                        
+                        st.session_state.analysis_done = True
+                    else:
+                        st.error("Could not extract financial data from this filing")
+    
+    elif analysis_type == "Direct Filing Analysis":
+        st.header("📑 Direct Filing Analysis")
+        filing_url = st.text_input("Enter SEC Filing URL", "https://www.sec.gov/ix?doc=/Archives/edgar/data/0000790652/000121390024098306/ea0220916-10q_imaging.htm")
+        
+        if st.button("Analyze Filing") and filing_url:
+            with st.spinner("Analyzing filing..."):
+                financial_data = extract_financial_data(filing_url)
+                
+                if financial_data:
+                    st.subheader("Financial Data")
+                    st.json(financial_data)
+                    
+                    st.subheader("Financial Analysis")
+                    analysis = analyze_financials(financial_data, {'form': 'Direct Filing'})
+                    st.markdown(analysis)
+                    
+                    st.subheader("Visualizations")
+                    figs = visualize_financials(financial_data)
+                    for fig in figs:
+                        st.pyplot(fig)
+                else:
+                    st.error("Could not extract financial data from this filing")
 
 if __name__ == "__main__":
     main()
-
