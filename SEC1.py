@@ -218,24 +218,77 @@ def parse_numeric_value(text):
     except:
         return None
 
+def extract_financial_data(filing_url):
+    """Extract financial data from filing document with better error handling"""
+    try:
+        # First try to get the actual document URL from the index page
+        if '/ix?doc=' in filing_url:
+            response = requests.get(filing_url, headers=HEADERS, timeout=15)
+            response.raise_for_status()
+            soup = BeautifulSoup(response.content, 'html.parser')
+            iframe = soup.find('iframe', {'id': 'edgar-iframe'})
+            if iframe and iframe.get('src'):
+                filing_url = urljoin(BASE_URL, iframe.get('src'))
+        
+        response = requests.get(filing_url, headers=HEADERS, timeout=15)
+        response.raise_for_status()
+        
+        content = response.content
+        
+        # Try XBRL first
+        xbrl_data = parse_xbrl_filing(content)
+        if xbrl_data and any(xbrl_data.values()):
+            return xbrl_data
+            
+        # Fall back to HTML parsing with improved table detection
+        html_data = parse_html_filing(content)
+        if html_data and any(html_data.values()):
+            return html_data
+            
+        # If we still haven't found data, try to find financial statements links
+        soup = BeautifulSoup(content, 'html.parser')
+        financial_links = []
+        for link in soup.find_all('a', href=True):
+            if any(term in link.text.lower() for term in ['financial', 'statement', 'balance sheet', 'income']):
+                financial_links.append(urljoin(filing_url, link['href']))
+        
+        # Try each financial statement link
+        for link in financial_links[:3]:  # Limit to first 3 links
+            try:
+                stmt_response = requests.get(link, headers=HEADERS, timeout=10)
+                stmt_response.raise_for_status()
+                stmt_data = parse_html_filing(stmt_response.content)
+                if stmt_data and any(stmt_data.values()):
+                    return stmt_data
+            except:
+                continue
+                
+        st.warning("Could not automatically extract financial data from this filing. Please check the filing manually.")
+        return None
+        
+    except Exception as e:
+        st.error(f"Error processing filing: {str(e)}")
+        return None
+
 def analyze_financials(financial_data, filing_info):
-    """Generate comprehensive financial analysis"""
-    if not financial_data:
-        return "No financial data available for analysis"
+    """Generate financial analysis with proper NULL handling"""
+    if not financial_data or all(v is None for v in financial_data.values()):
+        return "⚠️ Could not extract financial data from this filing. Please check the filing manually."
     
     analysis = []
     
-    # Basic metrics
+    # Basic metrics (only show if we have data)
     analysis.append("### Key Financial Metrics")
-    if 'revenue' in financial_data:
+    if financial_data.get('revenue') is not None:
         analysis.append(f"- **Revenue**: ${financial_data['revenue']:,.2f}")
-    if 'net_income' in financial_data:
+    if financial_data.get('net_income') is not None:
         analysis.append(f"- **Net Income**: ${financial_data['net_income']:,.2f}")
-    if 'operating_income' in financial_data:
+    if financial_data.get('operating_income') is not None:
         analysis.append(f"- **Operating Income**: ${financial_data['operating_income']:,.2f}")
     
-    # Balance Sheet Analysis
-    if 'total_assets' in financial_data and 'total_liabilities' in financial_data:
+    # Balance Sheet Analysis (only if we have both assets and liabilities)
+    if (financial_data.get('total_assets') is not None and 
+        financial_data.get('total_liabilities') is not None):
         equity = financial_data['total_assets'] - financial_data['total_liabilities']
         debt_to_equity = financial_data['total_liabilities'] / equity if equity != 0 else float('inf')
         analysis.append("\n### Balance Sheet Analysis")
@@ -244,23 +297,27 @@ def analyze_financials(financial_data, filing_info):
         analysis.append(f"- **Shareholders' Equity**: ${equity:,.2f}")
         analysis.append(f"- **Debt-to-Equity Ratio**: {debt_to_equity:.2f} {'(High Risk)' if debt_to_equity > 2 else '(Moderate)' if debt_to_equity > 1 else '(Low Risk)'}")
     
-    # Liquidity Analysis
-    if 'current_assets' in financial_data and 'current_liabilities' in financial_data:
+    # Liquidity Analysis (only if we have current assets/liabilities)
+    if (financial_data.get('current_assets') is not None and 
+        financial_data.get('current_liabilities') is not None):
         current_ratio = financial_data['current_assets'] / financial_data['current_liabilities']
-        quick_ratio = (financial_data.get('cash', 0)) / financial_data['current_liabilities'] if 'current_liabilities' in financial_data else None
+        quick_ratio = (financial_data.get('cash', 0)) / financial_data['current_liabilities']
         analysis.append("\n### Liquidity Analysis")
         analysis.append(f"- **Current Ratio**: {current_ratio:.2f} {'(Strong)' if current_ratio > 2 else '(Adequate)' if current_ratio > 1 else '(Weak)'}")
-        if quick_ratio:
+        if financial_data.get('cash') is not None:
             analysis.append(f"- **Quick Ratio**: {quick_ratio:.2f} {'(Strong)' if quick_ratio > 1 else '(Adequate)' if quick_ratio > 0.5 else '(Weak)'}")
     
-    # Profitability Analysis
-    if 'revenue' in financial_data and 'net_income' in financial_data:
+    # Profitability Analysis (only if we have both revenue and net income)
+    if (financial_data.get('revenue') is not None and 
+        financial_data.get('net_income') is not None):
         profit_margin = (financial_data['net_income'] / financial_data['revenue']) * 100
         analysis.append("\n### Profitability Analysis")
         analysis.append(f"- **Profit Margin**: {profit_margin:.2f}% {'(Excellent)' if profit_margin > 20 else '(Good)' if profit_margin > 10 else '(Marginal)'}")
     
+    if len(analysis) == 1:  # Only has the header
+        return "⚠️ Found some financial data but not enough to generate meaningful analysis."
+    
     return "\n".join(analysis)
-
 def visualize_financials(financial_data):
     """Create visualizations of financial data"""
     figs = []
