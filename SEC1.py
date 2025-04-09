@@ -364,3 +364,7 @@ def main():
         for sender, message in st.session_state.chat_history:
             css_class = "user-message" if sender == "user" else "bot-message"
             st.markdown(f'<div class="chat-message {css_class}">{message}</div>', unsafe_allow_html=True)
+
+if __name__ == "__main__":
+    main()
+
