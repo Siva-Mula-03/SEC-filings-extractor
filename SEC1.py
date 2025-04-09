@@ -342,6 +342,82 @@ def visualize_financials(financial_data):
         figs.append(fig2)
     
     return figs
+def analyze_financials(financial_data, filing_info):
+    """Generate financial analysis with robust error handling"""
+    if not financial_data:
+        return "⚠️ No financial data available for analysis"
+    
+    # Validate and clean the financial data
+    cleaned_data = {}
+    for key, value in financial_data.items():
+        if value is not None:
+            # Convert to absolute value for certain metrics
+            if key in ['cash', 'current_assets', 'total_assets']:
+                cleaned_data[key] = abs(float(value))
+            else:
+                cleaned_data[key] = float(value)
+    
+    analysis = []
+    analysis.append("### Key Financial Metrics")
+    
+    try:
+        # Basic metrics with validation
+        if 'revenue' in cleaned_data and cleaned_data['revenue'] > 0:
+            analysis.append(f"- **Revenue**: ${cleaned_data['revenue']:,.2f}")
+        
+        if 'net_income' in cleaned_data:
+            analysis.append(f"- **Net Income**: ${cleaned_data['net_income']:,.2f}")
+        
+        if 'operating_income' in cleaned_data:
+            analysis.append(f"- **Operating Income**: ${cleaned_data['operating_income']:,.2f}")
+        
+        # Balance Sheet Analysis with validation
+        if ('total_assets' in cleaned_data and 
+            'total_liabilities' in cleaned_data and
+            cleaned_data['total_assets'] > 0):
+            
+            if cleaned_data['total_liabilities'] > cleaned_data['total_assets']:
+                analysis.append("\n⚠️ Warning: Liabilities exceed total assets - data may need verification")
+            
+            equity = cleaned_data['total_assets'] - cleaned_data['total_liabilities']
+            analysis.append("\n### Balance Sheet Analysis")
+            analysis.append(f"- **Total Assets**: ${cleaned_data['total_assets']:,.2f}")
+            analysis.append(f"- **Total Liabilities**: ${cleaned_data['total_liabilities']:,.2f}")
+            analysis.append(f"- **Shareholders' Equity**: ${equity:,.2f}")
+            
+            if equity > 0:  # Only calculate ratio if equity is positive
+                debt_to_equity = cleaned_data['total_liabilities'] / equity
+                analysis.append(f"- **Debt-to-Equity Ratio**: {debt_to_equity:.2f}")
+        
+        # Liquidity Analysis with validation
+        if ('current_assets' in cleaned_data and 
+            'current_liabilities' in cleaned_data and
+            cleaned_data['current_liabilities'] > 0):
+            
+            current_ratio = cleaned_data['current_assets'] / cleaned_data['current_liabilities']
+            analysis.append("\n### Liquidity Analysis")
+            analysis.append(f"- **Current Ratio**: {current_ratio:.2f}")
+            
+            if 'cash' in cleaned_data:
+                quick_ratio = cleaned_data['cash'] / cleaned_data['current_liabilities']
+                analysis.append(f"- **Quick Ratio**: {quick_ratio:.2f}")
+        
+        # Profitability Analysis with validation
+        if ('revenue' in cleaned_data and 
+            'net_income' in cleaned_data and
+            cleaned_data['revenue'] > 0):
+            
+            profit_margin = (cleaned_data['net_income'] / cleaned_data['revenue']) * 100
+            analysis.append("\n### Profitability Analysis")
+            analysis.append(f"- **Profit Margin**: {profit_margin:.2f}%")
+        
+        if len(analysis) == 1:  # Only has the header
+            return "⚠️ Found financial data but couldn't generate meaningful analysis"
+        
+        return "\n".join(analysis)
+    
+    except Exception as e:
+        return f"⚠️ Error in analysis: Some calculated values may be invalid. Original data: {cleaned_data}"
 
 def main():
     st.set_page_config(page_title="SEC Filing Analyzer", layout="wide")
